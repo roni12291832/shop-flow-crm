@@ -22,11 +22,12 @@ import SpecialDates from "./pages/SpecialDates";
 import NpsDashboard from "./pages/NpsDashboard";
 import NpsConfig from "./pages/NpsConfig";
 import NpsPublic from "./pages/NpsPublic";
+import SellerMode from "./pages/SellerMode";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, noLayout }: { children: React.ReactNode; noLayout?: boolean }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -36,6 +37,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/auth" replace />;
+  if (noLayout) return <>{children}</>;
   return <AppLayout>{children}</AppLayout>;
 }
 
@@ -65,6 +67,7 @@ const AppRoutes = () => (
     <Route path="/nps" element={<ProtectedRoute><NpsDashboard /></ProtectedRoute>} />
     <Route path="/nps/configurar" element={<ProtectedRoute><NpsConfig /></ProtectedRoute>} />
     <Route path="/nps/:token" element={<NpsPublic />} />
+    <Route path="/vendedor" element={<ProtectedRoute noLayout><SellerMode /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

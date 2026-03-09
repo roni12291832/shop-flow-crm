@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Cake, Star,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Cake, Star, Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ const navItems = [
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
   { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" },
+  { icon: Smartphone, label: "Modo Vendedor", path: "/vendedor" },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
