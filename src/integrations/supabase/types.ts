@@ -404,6 +404,111 @@ export type Database = {
           },
         ]
       }
+      relationship_executions: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          message_sent: string | null
+          n8n_execution_id: string | null
+          rule_id: string
+          scheduled_for: string
+          sent_at: string | null
+          status: Database["public"]["Enums"]["execution_status"]
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          message_sent?: string | null
+          n8n_execution_id?: string | null
+          rule_id: string
+          scheduled_for: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["execution_status"]
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          message_sent?: string | null
+          n8n_execution_id?: string | null
+          rule_id?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["execution_status"]
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relationship_executions_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relationship_executions_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "relationship_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "relationship_executions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relationship_rules: {
+        Row: {
+          active: boolean
+          channel: Database["public"]["Enums"]["rule_channel"]
+          created_at: string
+          delay_days: number
+          id: string
+          message_template: string
+          name: string
+          tenant_id: string
+          trigger_event: Database["public"]["Enums"]["rule_trigger_event"]
+        }
+        Insert: {
+          active?: boolean
+          channel?: Database["public"]["Enums"]["rule_channel"]
+          created_at?: string
+          delay_days?: number
+          id?: string
+          message_template?: string
+          name: string
+          tenant_id: string
+          trigger_event?: Database["public"]["Enums"]["rule_trigger_event"]
+        }
+        Update: {
+          active?: boolean
+          channel?: Database["public"]["Enums"]["rule_channel"]
+          created_at?: string
+          delay_days?: number
+          id?: string
+          message_template?: string
+          name?: string
+          tenant_id?: string
+          trigger_event?: Database["public"]["Enums"]["rule_trigger_event"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relationship_rules_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sales_entries: {
         Row: {
           created_at: string
@@ -595,6 +700,7 @@ export type Database = {
         | "em_atendimento"
         | "aguardando"
         | "finalizada"
+      execution_status: "scheduled" | "sent" | "failed" | "cancelled"
       goal_period_type: "daily" | "weekly" | "monthly"
       lead_origin:
         | "whatsapp"
@@ -627,6 +733,12 @@ export type Database = {
         | "proposta_enviada"
         | "venda_fechada"
         | "perdido"
+      rule_channel: "whatsapp" | "sms" | "email"
+      rule_trigger_event:
+        | "after_purchase"
+        | "no_purchase"
+        | "birthday"
+        | "manual"
       sale_status: "confirmado" | "pendente" | "cancelado"
       task_priority: "alta" | "media" | "baixa"
       task_status: "pendente" | "em_andamento" | "concluido"
@@ -764,6 +876,7 @@ export const Constants = {
         "aguardando",
         "finalizada",
       ],
+      execution_status: ["scheduled", "sent", "failed", "cancelled"],
       goal_period_type: ["daily", "weekly", "monthly"],
       lead_origin: [
         "whatsapp",
@@ -799,6 +912,13 @@ export const Constants = {
         "proposta_enviada",
         "venda_fechada",
         "perdido",
+      ],
+      rule_channel: ["whatsapp", "sms", "email"],
+      rule_trigger_event: [
+        "after_purchase",
+        "no_purchase",
+        "birthday",
+        "manual",
       ],
       sale_status: ["confirmado", "pendente", "cancelado"],
       task_priority: ["alta", "media", "baixa"],
