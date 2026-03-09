@@ -34,9 +34,10 @@ export default function Tasks() {
   const { tenantId, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [members, setMembers] = useState<ProfileItem[]>([]);
   const [filter, setFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media" });
+  const [form, setForm] = useState({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media", responsible_id: "" });
 
   const fetchData = async () => {
     if (!tenantId) return;
