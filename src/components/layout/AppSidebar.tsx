@@ -25,6 +25,7 @@ const navItems = [
   { icon: Kanban, label: "Pipeline", path: "/pipeline" },
   { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },
   { icon: Target, label: "Metas", path: "/metas" },
+  { icon: Zap, label: "Régua", path: "/regua-relacionamento" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
