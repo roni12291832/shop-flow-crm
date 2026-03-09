@@ -26,25 +26,29 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
   baixa: { label: "Baixa", color: "hsl(var(--chart-1))" },
 };
 
-interface Task { id: string; title: string; description: string | null; status: string; priority: string; due_date: string | null; client_id: string | null; }
+interface Task { id: string; title: string; description: string | null; status: string; priority: string; due_date: string | null; client_id: string | null; responsible_id: string | null; }
 interface Client { id: string; name: string; }
+interface ProfileItem { user_id: string; name: string; }
 
 export default function Tasks() {
   const { tenantId, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [members, setMembers] = useState<ProfileItem[]>([]);
   const [filter, setFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media" });
+  const [form, setForm] = useState({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media", responsible_id: "" });
 
   const fetchData = async () => {
     if (!tenantId) return;
-    const [t, c] = await Promise.all([
+    const [t, c, m] = await Promise.all([
       supabase.from("tasks").select("*").eq("tenant_id", tenantId).order("due_date", { ascending: true, nullsFirst: false }),
       supabase.from("clients").select("id, name").eq("tenant_id", tenantId),
+      supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
     ]);
     if (t.data) setTasks(t.data as Task[]);
     if (c.data) setClients(c.data as Client[]);
+    if (m.data) setMembers(m.data as ProfileItem[]);
   };
 
   useEffect(() => { fetchData(); }, [tenantId]);
@@ -55,10 +59,10 @@ export default function Tasks() {
     const { error } = await supabase.from("tasks").insert({
       tenant_id: tenantId, title: form.title, description: form.description || null,
       due_date: form.due_date || null, client_id: form.client_id || null,
-      responsible_id: user.id, status: form.status as any, priority: form.priority as any,
+      responsible_id: form.responsible_id || null, status: form.status as any, priority: form.priority as any,
     });
     if (error) toast.error("Erro ao criar tarefa");
-    else { toast.success("Tarefa criada!"); setDialogOpen(false); setForm({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media" }); fetchData(); }
+    else { toast.success("Tarefa criada!"); setDialogOpen(false); setForm({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media", responsible_id: "" }); fetchData(); }
   };
 
   const updateStatus = async (id: string, status: string) => {
@@ -115,6 +119,14 @@ export default function Tasks() {
                   <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2"><Label>Responsável</Label>
+                <Select value={form.responsible_id} onValueChange={(v) => setForm({ ...form, responsible_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Geral (todos)" /></SelectTrigger>
+                  <SelectContent>
+                    {members.map(m => <SelectItem key={m.user_id} value={m.user_id}>{m.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button type="submit" className="w-full">Criar Tarefa</Button>
             </form>
           </DialogContent>
@@ -154,6 +166,7 @@ export default function Tasks() {
                 <div className="flex items-center gap-4 mt-1.5 text-[12px] text-muted-foreground">
                   {task.due_date && <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{new Date(task.due_date).toLocaleDateString("pt-BR")}</span>}
                   {client && <span className="flex items-center gap-1"><User className="h-3 w-3" />{client.name}</span>}
+                  <span className="italic">{task.responsible_id ? members.find(m => m.user_id === task.responsible_id)?.name || "—" : "Geral"}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">

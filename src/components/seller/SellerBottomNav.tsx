@@ -1,10 +1,11 @@
-import { Home, PlusCircle, Clock, User } from "lucide-react";
+import { Home, PlusCircle, Clock, User, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Tab = "home" | "sale" | "history" | "profile";
+type Tab = "home" | "sale" | "tasks" | "history" | "profile";
 
 const tabs: { key: Tab; label: string; icon: typeof Home }[] = [
   { key: "home", label: "Início", icon: Home },
+  { key: "tasks", label: "Tarefas", icon: ClipboardList },
   { key: "sale", label: "Vender", icon: PlusCircle },
   { key: "history", label: "Histórico", icon: Clock },
   { key: "profile", label: "Perfil", icon: User },

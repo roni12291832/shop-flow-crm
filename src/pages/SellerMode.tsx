@@ -1,15 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { useState, useCallback } from "react";
 import { SellerBottomNav } from "@/components/seller/SellerBottomNav";
 import { SellerHome } from "@/components/seller/SellerHome";
 import { SellerQuickSale } from "@/components/seller/SellerQuickSale";
 import { SellerHistory } from "@/components/seller/SellerHistory";
 import { SellerProfile } from "@/components/seller/SellerProfile";
+import { SellerTasks } from "@/components/seller/SellerTasks";
 
 export default function SellerMode() {
-  const { tenantId, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"home" | "sale" | "history" | "profile">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "sale" | "tasks" | "history" | "profile">("home");
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
@@ -19,6 +17,7 @@ export default function SellerMode() {
       <div className="flex-1 overflow-y-auto">
         {activeTab === "home" && <SellerHome key={refreshKey} />}
         {activeTab === "sale" && <SellerQuickSale onSaleCreated={() => { refresh(); setActiveTab("home"); }} />}
+        {activeTab === "tasks" && <SellerTasks key={refreshKey} />}
         {activeTab === "history" && <SellerHistory key={refreshKey} />}
         {activeTab === "profile" && <SellerProfile />}
       </div>
