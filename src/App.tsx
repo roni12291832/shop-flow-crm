@@ -18,6 +18,7 @@ import Settings from "./pages/Settings";
 import Goals from "./pages/Goals";
 import GoalsConfig from "./pages/GoalsConfig";
 import RelationshipRules from "./pages/RelationshipRules";
+import SpecialDates from "./pages/SpecialDates";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
