@@ -137,7 +137,29 @@ export default function Settings() {
         <div className="bg-card border border-border rounded-2xl p-6 max-w-lg space-y-4">
           <h3 className="text-foreground font-bold text-base">Dados da Empresa</h3>
           <div className="space-y-2"><Label>Nome da Empresa</Label><Input value={tenant.company_name} onChange={(e) => setTenant({ ...tenant, company_name: e.target.value })} /></div>
-          <div className="space-y-2"><Label>URL do Logo</Label><Input value={tenant.logo_url} onChange={(e) => setTenant({ ...tenant, logo_url: e.target.value })} placeholder="https://..." /></div>
+          <div className="space-y-2">
+            <Label>URL do Logo</Label>
+            <Input value={tenant.logo_url} onChange={(e) => setTenant({ ...tenant, logo_url: e.target.value })} placeholder="https://exemplo.com/logo.png" />
+            <p className="text-xs text-muted-foreground">
+              ⚠️ Use um link direto da imagem (terminando em .png, .jpg, .webp). Links de páginas web não funcionam. 
+              Dica: no Google Imagens, clique com botão direito na imagem → "Copiar endereço da imagem".
+            </p>
+            {tenant.logo_url && (
+              <div className="mt-2 p-3 border border-border rounded-xl bg-secondary/30">
+                <p className="text-xs text-muted-foreground mb-2">Preview:</p>
+                <img 
+                  src={tenant.logo_url} 
+                  alt="Logo preview" 
+                  className="h-16 max-w-[200px] object-contain"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  onLoad={(e) => { (e.target as HTMLImageElement).style.display = 'block'; }}
+                />
+                {tenant.logo_url && !tenant.logo_url.match(/\.(png|jpg|jpeg|gif|webp|svg|ico)(\?.*)?$/i) && (
+                  <p className="text-xs text-destructive mt-1">⚠️ Este link não parece ser de uma imagem direta. Verifique se termina com .png, .jpg, etc.</p>
+                )}
+              </div>
+            )}
+          </div>
           <Separator className="bg-border" />
           <Label className="flex items-center gap-1.5"><Palette className="h-4 w-4" /> Personalização</Label>
           <div className="grid grid-cols-2 gap-4">
