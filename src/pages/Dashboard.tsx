@@ -212,8 +212,9 @@ export default function Dashboard() {
       </div>
 
       {/* Birthday Widget + Tasks */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         <BirthdayDashboardWidget />
+        <NpsDashboardWidget />
 
       <div className="bg-card border border-border rounded-2xl p-6">
         <div className="flex justify-between mb-5">
