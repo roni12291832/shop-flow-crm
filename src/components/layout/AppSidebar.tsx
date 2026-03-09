@@ -13,6 +13,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super Admin",
   admin: "Administrador",
   gerente: "Gerente",
   vendedor: "Vendedor",
