@@ -105,7 +105,7 @@ export default function RelationshipRules() {
     } else {
       const { error } = await supabase
         .from("relationship_rules")
-        .insert({ ...data, tenant_id: tenantId });
+        .insert([{ ...data, tenant_id: tenantId }]);
 
       if (error) { toast.error("Erro ao criar régua"); return; }
       toast.success("Régua criada!");
