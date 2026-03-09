@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { Users, TrendingUp, DollarSign, Target, AlertTriangle, Info, Clock, User, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BirthdayDashboardWidget } from "@/components/datas/BirthdayDashboardWidget";
 
 const STAGE_LABELS: Record<string, string> = {
   lead_recebido: "Lead Recebido", contato_iniciado: "Contato Iniciado",
@@ -209,7 +210,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Tasks */}
+      {/* Birthday Widget + Tasks */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr] gap-5">
+        <BirthdayDashboardWidget />
+
       <div className="bg-card border border-border rounded-2xl p-6">
         <div className="flex justify-between mb-5">
           <span className="text-foreground font-bold text-base">Tarefas de Hoje</span>
@@ -234,6 +238,7 @@ export default function Dashboard() {
         ) : (
           <div className="text-center text-muted-foreground py-8 text-sm">Nenhuma tarefa pendente 🎉</div>
         )}
+      </div>
       </div>
     </div>
   );

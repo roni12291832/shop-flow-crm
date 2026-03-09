@@ -18,6 +18,7 @@ import Settings from "./pages/Settings";
 import Goals from "./pages/Goals";
 import GoalsConfig from "./pages/GoalsConfig";
 import RelationshipRules from "./pages/RelationshipRules";
+import SpecialDates from "./pages/SpecialDates";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -57,6 +58,7 @@ const AppRoutes = () => (
     <Route path="/metas" element={<ProtectedRoute><Goals /></ProtectedRoute>} />
     <Route path="/metas/configurar" element={<ProtectedRoute><GoalsConfig /></ProtectedRoute>} />
     <Route path="/regua-relacionamento" element={<ProtectedRoute><RelationshipRules /></ProtectedRoute>} />
+    <Route path="/datas-especiais" element={<ProtectedRoute><SpecialDates /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
