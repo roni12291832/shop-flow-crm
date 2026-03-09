@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Cake, Star, Smartphone,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const ROLE_LABELS: Record<string, string> = {
+  super_admin: "Super Admin",
   admin: "Administrador",
   gerente: "Gerente",
   vendedor: "Vendedor",
@@ -122,6 +123,34 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Bottom */}
       <div className="px-3 pb-4 space-y-1 border-t border-sidebar-border pt-3">
+        <button
+          onClick={() => handleNav("/whatsapp-connect")}
+          className={cn(
+            "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
+            location.pathname === "/whatsapp-connect"
+              ? "bg-primary/20 text-primary border border-primary/40"
+              : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
+          )}
+        >
+          <Wifi className="h-4 w-4" />
+          Conectar WhatsApp
+        </button>
+
+        {roles.includes("super_admin") && (
+          <button
+            onClick={() => handleNav("/admin")}
+            className={cn(
+              "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
+              location.pathname === "/admin"
+                ? "bg-destructive/20 text-destructive border border-destructive/40"
+                : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            Super Admin
+          </button>
+        )}
+
         <button
           onClick={() => handleNav("/settings")}
           className={cn(
