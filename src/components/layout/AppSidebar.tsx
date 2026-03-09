@@ -123,6 +123,34 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Bottom */}
       <div className="px-3 pb-4 space-y-1 border-t border-sidebar-border pt-3">
         <button
+          onClick={() => handleNav("/whatsapp-connect")}
+          className={cn(
+            "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
+            location.pathname === "/whatsapp-connect"
+              ? "bg-primary/20 text-primary border border-primary/40"
+              : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
+          )}
+        >
+          <Wifi className="h-4 w-4" />
+          Conectar WhatsApp
+        </button>
+
+        {roles.includes("super_admin") && (
+          <button
+            onClick={() => handleNav("/admin")}
+            className={cn(
+              "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
+              location.pathname === "/admin"
+                ? "bg-destructive/20 text-destructive border border-destructive/40"
+                : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            Super Admin
+          </button>
+        )}
+
+        <button
           onClick={() => handleNav("/settings")}
           className={cn(
             "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
