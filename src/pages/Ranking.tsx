@@ -91,7 +91,7 @@ export default function Ranking() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {sellers.slice(0, 3).map((seller, i) => (
             <Card key={seller.user_id} className={`relative overflow-hidden ${i === 0 ? "border-warning/50 shadow-md" : ""}`}>
-              {i === 0 && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-warning to-yellow-400" />}
+              {i === 0 && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-warning to-warning/60" />}
               <CardContent className="p-5 text-center">
                 <div className="mb-3">{getRankIcon(i)}</div>
                 <div className="w-14 h-14 rounded-full gradient-primary mx-auto flex items-center justify-center text-lg font-bold text-white mb-3">
