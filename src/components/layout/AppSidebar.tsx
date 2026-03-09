@@ -41,6 +41,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { profile, roles, signOut, tenantId, user } = useAuth();
   const [chatCount, setChatCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
+  const [tenantInfo, setTenantInfo] = useState<{ company_name: string; logo_url: string | null } | null>(null);
 
   const userRole = roles.length > 0 ? ROLE_LABELS[roles[0]] || roles[0] : "Usuário";
 
@@ -55,6 +56,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       setNotifCount(nCount || 0);
     };
     fetchCounts();
+
+    // Fetch tenant info (logo, name)
+    supabase.from("tenants").select("company_name, logo_url").eq("id", tenantId).single().then(({ data }) => {
+      if (data) setTenantInfo(data);
+    });
 
     const channel = supabase
       .channel("sidebar-badges")
@@ -81,12 +87,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* Logo */}
       <div className="px-5 py-6 border-b border-sidebar-border">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-[10px] gradient-primary flex items-center justify-center shadow-glow">
-            <BarChart3 className="h-[18px] w-[18px] text-white" />
-          </div>
+          {tenantInfo?.logo_url ? (
+            <img src={tenantInfo.logo_url} alt={tenantInfo.company_name} className="w-9 h-9 rounded-[10px] object-contain" />
+          ) : (
+            <div className="w-9 h-9 rounded-[10px] gradient-primary flex items-center justify-center shadow-glow">
+              <BarChart3 className="h-[18px] w-[18px] text-white" />
+            </div>
+          )}
           <div>
-            <div className="text-[15px] font-extrabold text-foreground">StoreCRM</div>
-            <div className="text-[11px] text-muted-foreground">Loja Premium</div>
+            <div className="text-[15px] font-extrabold text-foreground">{tenantInfo?.company_name || "StoreCRM"}</div>
+            <div className="text-[11px] text-muted-foreground">{userRole}</div>
           </div>
         </div>
       </div>
