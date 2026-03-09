@@ -12,9 +12,9 @@ import { toast } from "sonner";
 interface Rule {
   id: string;
   name: string;
-  trigger_event: string;
+  trigger_event: "after_purchase" | "no_purchase" | "birthday" | "manual";
   delay_days: number;
-  channel: string;
+  channel: "whatsapp" | "sms" | "email";
   active: boolean;
   message_template: string;
   tenant_id: string;
