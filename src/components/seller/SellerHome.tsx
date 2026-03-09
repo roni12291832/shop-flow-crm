@@ -134,6 +134,34 @@ export function SellerHome() {
         ))}
       </div>
 
+      {/* Ranking */}
+      {ranking.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Trophy className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-bold text-foreground">Ranking do Mês</h3>
+            {myPosition > 0 && (
+              <span className="ml-auto text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                Você: {myPosition}º
+              </span>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            {ranking.map((r, i) => (
+              <div key={r.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border ${r.userId === user?.id ? "bg-primary/5 border-primary/30" : "bg-card border-border"}`}>
+                <span className={`text-sm font-bold w-6 text-center ${i === 0 ? "text-primary" : "text-muted-foreground"}`}>
+                  {i + 1}º
+                </span>
+                <span className="text-sm text-foreground flex-1 truncate">{r.name}</span>
+                <span className="text-sm font-semibold text-foreground">
+                  R$ {r.total.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent sales */}
       {recentSales.length > 0 && (
         <div>
