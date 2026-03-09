@@ -75,7 +75,7 @@ export default function Ranking() {
   const getRankIcon = (index: number) => {
     if (index === 0) return <Trophy className="h-6 w-6 text-warning" />;
     if (index === 1) return <Medal className="h-6 w-6 text-muted-foreground" />;
-    if (index === 2) return <Medal className="h-6 w-6 text-orange-400" />;
+    if (index === 2) return <Medal className="h-6 w-6 text-warning/70" />;
     return <span className="w-6 h-6 flex items-center justify-center text-sm font-bold text-muted-foreground">{index + 1}</span>;
   };
 
