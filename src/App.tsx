@@ -66,6 +66,7 @@ const AppRoutes = () => (
     <Route path="/nps" element={<ProtectedRoute><NpsDashboard /></ProtectedRoute>} />
     <Route path="/nps/configurar" element={<ProtectedRoute><NpsConfig /></ProtectedRoute>} />
     <Route path="/nps/:token" element={<NpsPublic />} />
+    <Route path="/vendedor" element={<ProtectedRoute><SellerMode /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

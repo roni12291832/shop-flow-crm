@@ -32,6 +32,7 @@ const navItems = [
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
   { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" },
+  { icon: Smartphone, label: "Modo Vendedor", path: "/vendedor" },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
