@@ -19,6 +19,9 @@ import Goals from "./pages/Goals";
 import GoalsConfig from "./pages/GoalsConfig";
 import RelationshipRules from "./pages/RelationshipRules";
 import SpecialDates from "./pages/SpecialDates";
+import NpsDashboard from "./pages/NpsDashboard";
+import NpsConfig from "./pages/NpsConfig";
+import NpsPublic from "./pages/NpsPublic";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -59,6 +62,9 @@ const AppRoutes = () => (
     <Route path="/metas/configurar" element={<ProtectedRoute><GoalsConfig /></ProtectedRoute>} />
     <Route path="/regua-relacionamento" element={<ProtectedRoute><RelationshipRules /></ProtectedRoute>} />
     <Route path="/datas-especiais" element={<ProtectedRoute><SpecialDates /></ProtectedRoute>} />
+    <Route path="/nps" element={<ProtectedRoute><NpsDashboard /></ProtectedRoute>} />
+    <Route path="/nps/configurar" element={<ProtectedRoute><NpsConfig /></ProtectedRoute>} />
+    <Route path="/nps/:token" element={<NpsPublic />} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
