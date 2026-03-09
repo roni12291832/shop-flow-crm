@@ -57,6 +57,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     };
     fetchCounts();
 
+    // Fetch tenant info (logo, name)
+    supabase.from("tenants").select("company_name, logo_url").eq("id", tenantId).single().then(({ data }) => {
+      if (data) setTenantInfo(data);
+    });
+
     const channel = supabase
       .channel("sidebar-badges")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => fetchCounts())
