@@ -78,7 +78,7 @@ function HomeRedirect() {
   }
   const isOnlySeller = roles.length > 0 && roles.every(r => r === "vendedor" || r === "atendimento");
   if (isOnlySeller) return <Navigate to="/vendedor" replace />;
-  return <AppLayout><Dashboard /></AppLayout>;
+  return <Dashboard />;
 }
 
 const AppRoutes = () => (
