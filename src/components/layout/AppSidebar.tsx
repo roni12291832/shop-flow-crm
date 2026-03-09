@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Cake,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
