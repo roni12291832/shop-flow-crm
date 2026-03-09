@@ -62,6 +62,9 @@ const AppRoutes = () => (
     <Route path="/metas/configurar" element={<ProtectedRoute><GoalsConfig /></ProtectedRoute>} />
     <Route path="/regua-relacionamento" element={<ProtectedRoute><RelationshipRules /></ProtectedRoute>} />
     <Route path="/datas-especiais" element={<ProtectedRoute><SpecialDates /></ProtectedRoute>} />
+    <Route path="/nps" element={<ProtectedRoute><NpsDashboard /></ProtectedRoute>} />
+    <Route path="/nps/configurar" element={<ProtectedRoute><NpsConfig /></ProtectedRoute>} />
+    <Route path="/nps/:token" element={<NpsPublic />} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
