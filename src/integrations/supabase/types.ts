@@ -69,11 +69,58 @@ export type Database = {
           },
         ]
       }
+      birthday_campaigns: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          sent_at: string | null
+          status: string
+          tenant_id: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          sent_at?: string | null
+          status?: string
+          tenant_id: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          sent_at?: string | null
+          status?: string
+          tenant_id?: string
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "birthday_campaigns_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "birthday_campaigns_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
+          birth_date: string | null
           city: string | null
           created_at: string
           email: string | null
+          gender: string | null
           id: string
           last_purchase: string | null
           name: string
@@ -87,9 +134,11 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          birth_date?: string | null
           city?: string | null
           created_at?: string
           email?: string | null
+          gender?: string | null
           id?: string
           last_purchase?: string | null
           name: string
@@ -103,9 +152,11 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          birth_date?: string | null
           city?: string | null
           created_at?: string
           email?: string | null
+          gender?: string | null
           id?: string
           last_purchase?: string | null
           name?: string
@@ -556,6 +607,47 @@ export type Database = {
           },
           {
             foreignKeyName: "sales_entries_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      special_dates: {
+        Row: {
+          active: boolean
+          created_at: string
+          date: string
+          id: string
+          message_template: string | null
+          name: string
+          segment_tags: string[] | null
+          tenant_id: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          date: string
+          id?: string
+          message_template?: string | null
+          name: string
+          segment_tags?: string[] | null
+          tenant_id: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          date?: string
+          id?: string
+          message_template?: string | null
+          name?: string
+          segment_tags?: string[] | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "special_dates_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
