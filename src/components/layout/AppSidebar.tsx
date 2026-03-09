@@ -22,11 +22,10 @@ const ROLE_LABELS: Record<string, string> = {
 const navItems = [
   { icon: Home, label: "Dashboard", path: "/" },
   { icon: Users, label: "Clientes", path: "/clients" },
-  { icon: Kanban, label: "Pipeline", path: "/pipeline" },
+  { icon: Kanban, label: "Fluxo CRM", path: "/pipeline" },
   { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },
   { icon: Target, label: "Metas", path: "/metas" },
-  { icon: Zap, label: "Régua", path: "/regua-relacionamento" },
-  { icon: Cake, label: "Datas", path: "/datas-especiais" },
+  { icon: Zap, label: "Relacionamento", path: "/regua-relacionamento" },
   { icon: Star, label: "NPS", path: "/nps" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
