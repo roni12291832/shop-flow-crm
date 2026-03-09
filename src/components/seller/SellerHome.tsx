@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { GoalGauge } from "@/components/metas/GoalGauge";
-import { TrendingUp, DollarSign, ShoppingBag, Target } from "lucide-react";
+import { TrendingUp, DollarSign, ShoppingBag, Target, Trophy } from "lucide-react";
+
+interface RankEntry { name: string; total: number; userId: string; }
 
 export function SellerHome() {
   const { tenantId, user, profile } = useAuth();
@@ -12,6 +14,8 @@ export function SellerHome() {
   const [todayGoal, setTodayGoal] = useState(0);
   const [monthGoal, setMonthGoal] = useState(0);
   const [recentSales, setRecentSales] = useState<any[]>([]);
+  const [ranking, setRanking] = useState<RankEntry[]>([]);
+  const [myPosition, setMyPosition] = useState(0);
 
   useEffect(() => {
     if (!tenantId || !user) return;
@@ -19,7 +23,8 @@ export function SellerHome() {
     const todayStr = now.toISOString().split("T")[0];
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    const fetch = async () => {
+    const fetchData = async () => {
+      // Own sales
       const { data: sales } = await supabase.from("sales_entries")
         .select("value, sold_at, status, payment_method, created_at")
         .eq("tenant_id", tenantId)
@@ -35,6 +40,7 @@ export function SellerHome() {
       setMonthSales(s.reduce((sum, x) => sum + Number(x.value), 0));
       setRecentSales(s.slice(0, 5));
 
+      // Goals — individual first, fallback to store-wide
       const { data: goals } = await supabase.from("goals")
         .select("*").eq("tenant_id", tenantId)
         .or(`user_id.eq.${user.id},user_id.is.null`)
@@ -42,15 +48,44 @@ export function SellerHome() {
         .lte("start_date", todayStr);
 
       const g = goals || [];
-      const daily = g.find((x: any) => x.period_type === "daily");
-      const monthly = g.find((x: any) => x.period_type === "monthly");
-      setTodayGoal(daily ? Number(daily.target_value) : 0);
-      setMonthGoal(monthly ? Number(monthly.target_value) : 0);
+      const dailyIndividual = g.find((x: any) => x.period_type === "daily" && x.user_id === user.id);
+      const dailyStore = g.find((x: any) => x.period_type === "daily" && !x.user_id);
+      const monthlyIndividual = g.find((x: any) => x.period_type === "monthly" && x.user_id === user.id);
+      const monthlyStore = g.find((x: any) => x.period_type === "monthly" && !x.user_id);
+      setTodayGoal(Number((dailyIndividual || dailyStore)?.target_value || 0));
+      setMonthGoal(Number((monthlyIndividual || monthlyStore)?.target_value || 0));
+
+      // Ranking — all sellers in tenant this month
+      const { data: allSales } = await supabase.from("sales_entries")
+        .select("user_id, value")
+        .eq("tenant_id", tenantId)
+        .eq("status", "confirmado")
+        .gte("sold_at", startOfMonth);
+
+      const { data: profiles } = await supabase.from("profiles")
+        .select("user_id, name")
+        .eq("tenant_id", tenantId);
+
+      const profileMap: Record<string, string> = {};
+      (profiles || []).forEach((p: any) => { profileMap[p.user_id] = p.name; });
+
+      const totals: Record<string, number> = {};
+      (allSales || []).forEach((s: any) => {
+        totals[s.user_id] = (totals[s.user_id] || 0) + Number(s.value);
+      });
+
+      const rankList: RankEntry[] = Object.entries(totals)
+        .map(([userId, total]) => ({ userId, total, name: profileMap[userId] || "—" }))
+        .sort((a, b) => b.total - a.total);
+
+      setRanking(rankList.slice(0, 5));
+      const pos = rankList.findIndex(r => r.userId === user.id);
+      setMyPosition(pos >= 0 ? pos + 1 : 0);
     };
-    fetch();
+    fetchData();
 
     const channel = supabase.channel("seller-home")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sales_entries" }, () => fetch())
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_entries" }, () => fetchData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [tenantId, user]);
