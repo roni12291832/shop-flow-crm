@@ -270,9 +270,15 @@ export default function Chat() {
             )}
             {messages.map((m) => {
               const isAgent = m.sender_type === "atendente" || m.sender_type === "ia";
+              const senderName = isAgent && m.sender_id ? profileMap[m.sender_id] : null;
               return (
                 <div key={m.id} className={isAgent ? "self-end" : "self-start"}>
                   <div className={`rounded-xl px-3.5 py-2.5 max-w-[70%] ${isAgent ? "bg-primary rounded-br-md" : "bg-border rounded-bl-md"}`}>
+                    {isAgent && senderName && (
+                      <div className={`text-[10px] font-semibold mb-0.5 ${isAgent ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                        {m.sender_type === "ia" ? "🤖 IA" : senderName}
+                      </div>
+                    )}
                     <span className={`text-[13px] ${isAgent ? "text-primary-foreground" : "text-foreground"}`}>{m.content}</span>
                     <div className={`text-[10px] mt-1 ${isAgent ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                       {new Date(m.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
