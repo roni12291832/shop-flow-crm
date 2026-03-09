@@ -26,6 +26,7 @@ const navItems = [
   { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },
   { icon: Target, label: "Metas", path: "/metas" },
   { icon: Zap, label: "Régua", path: "/regua-relacionamento" },
+  { icon: Cake, label: "Datas", path: "/datas-especiais" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },

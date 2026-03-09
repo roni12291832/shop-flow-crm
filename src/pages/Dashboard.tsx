@@ -239,6 +239,7 @@ export default function Dashboard() {
           <div className="text-center text-muted-foreground py-8 text-sm">Nenhuma tarefa pendente 🎉</div>
         )}
       </div>
+      </div>
     </div>
   );
 }
