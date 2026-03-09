@@ -357,6 +357,113 @@ export type Database = {
           },
         ]
       }
+      nps_settings: {
+        Row: {
+          ask_comment_from_score: number
+          auto_send_after_conversation: boolean
+          auto_send_after_sale: boolean
+          created_at: string
+          delay_hours: number
+          id: string
+          message_template: string | null
+          tenant_id: string
+          webhook_url: string | null
+        }
+        Insert: {
+          ask_comment_from_score?: number
+          auto_send_after_conversation?: boolean
+          auto_send_after_sale?: boolean
+          created_at?: string
+          delay_hours?: number
+          id?: string
+          message_template?: string | null
+          tenant_id: string
+          webhook_url?: string | null
+        }
+        Update: {
+          ask_comment_from_score?: number
+          auto_send_after_conversation?: boolean
+          auto_send_after_sale?: boolean
+          created_at?: string
+          delay_hours?: number
+          id?: string
+          message_template?: string | null
+          tenant_id?: string
+          webhook_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nps_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nps_surveys: {
+        Row: {
+          category: Database["public"]["Enums"]["nps_category"] | null
+          comment: string | null
+          created_at: string
+          customer_id: string
+          id: string
+          reference_id: string | null
+          responded_at: string | null
+          score: number | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["nps_status"]
+          tenant_id: string
+          triggered_by: Database["public"]["Enums"]["nps_trigger"]
+          unique_token: string
+        }
+        Insert: {
+          category?: Database["public"]["Enums"]["nps_category"] | null
+          comment?: string | null
+          created_at?: string
+          customer_id: string
+          id?: string
+          reference_id?: string | null
+          responded_at?: string | null
+          score?: number | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["nps_status"]
+          tenant_id: string
+          triggered_by?: Database["public"]["Enums"]["nps_trigger"]
+          unique_token?: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["nps_category"] | null
+          comment?: string | null
+          created_at?: string
+          customer_id?: string
+          id?: string
+          reference_id?: string | null
+          responded_at?: string | null
+          score?: number | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["nps_status"]
+          tenant_id?: string
+          triggered_by?: Database["public"]["Enums"]["nps_trigger"]
+          unique_token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nps_surveys_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nps_surveys_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       opportunities: {
         Row: {
           client_id: string
@@ -810,6 +917,9 @@ export type Database = {
         | "sem_resposta"
         | "outro"
       message_sender_type: "cliente" | "atendente" | "ia"
+      nps_category: "promotor" | "neutro" | "detrator"
+      nps_status: "sent" | "responded" | "expired"
+      nps_trigger: "after_sale" | "after_conversation" | "manual" | "scheduled"
       payment_method:
         | "pix"
         | "credito"
@@ -988,6 +1098,9 @@ export const Constants = {
         "outro",
       ],
       message_sender_type: ["cliente", "atendente", "ia"],
+      nps_category: ["promotor", "neutro", "detrator"],
+      nps_status: ["sent", "responded", "expired"],
+      nps_trigger: ["after_sale", "after_conversation", "manual", "scheduled"],
       payment_method: [
         "pix",
         "credito",
