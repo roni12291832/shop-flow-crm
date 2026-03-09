@@ -13,28 +13,19 @@ import {
 } from "@/components/ui/select";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
+import { ClientDetailDrawer } from "@/components/crm/ClientDetailDrawer";
 
 const ORIGINS = [
-  { value: "whatsapp", label: "WhatsApp" },
-  { value: "instagram", label: "Instagram" },
-  { value: "facebook", label: "Facebook" },
-  { value: "google", label: "Google" },
-  { value: "indicacao", label: "Indicação" },
-  { value: "loja_fisica", label: "Loja Física" },
-  { value: "site", label: "Site" },
-  { value: "outro", label: "Outro" },
+  { value: "whatsapp", label: "WhatsApp" }, { value: "instagram", label: "Instagram" },
+  { value: "facebook", label: "Facebook" }, { value: "google", label: "Google" },
+  { value: "indicacao", label: "Indicação" }, { value: "loja_fisica", label: "Loja Física" },
+  { value: "site", label: "Site" }, { value: "outro", label: "Outro" },
 ];
 
 interface Client {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  city: string | null;
-  origin: string | null;
-  tags: string[] | null;
-  ticket_medio: number | null;
-  created_at: string;
+  id: string; name: string; phone: string | null; email: string | null;
+  city: string | null; origin: string | null; tags: string[] | null;
+  ticket_medio: number | null; created_at: string;
 }
 
 export default function Clients() {
@@ -43,6 +34,8 @@ export default function Clients() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
   const fetchClients = async () => {
     if (!tenantId) return;
@@ -63,6 +56,8 @@ export default function Clients() {
     else { toast.success("Cliente criado!"); setDialogOpen(false); setForm({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" }); fetchClients(); }
   };
 
+  const openDetail = (id: string) => { setSelectedClientId(id); setDrawerOpen(true); };
+
   const filtered = clients.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.city?.toLowerCase().includes(search.toLowerCase()) ||
@@ -77,9 +72,7 @@ export default function Clients() {
           <Input className="pl-10 bg-card border-border" placeholder="Buscar clientes..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2"><Plus className="h-4 w-4" /> Novo Cliente</Button>
-          </DialogTrigger>
+          <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> Novo Cliente</Button></DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Novo Cliente</DialogTitle></DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
@@ -103,60 +96,60 @@ export default function Clients() {
         </Dialog>
       </div>
 
-      {/* Table */}
       <div className="bg-card border border-border rounded-2xl overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              {["Cliente", "Telefone", "Cidade", "Origem", "Tags", "Ticket Médio", "Ações"].map(h => (
-                <th key={h} className="px-5 py-3.5 text-left text-muted-foreground text-[12px] font-semibold uppercase tracking-wider">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id} className="border-b border-border/20 hover:bg-border/40 transition-colors cursor-pointer">
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-[11px] font-bold text-white">
-                      {c.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                    </div>
-                    <span className="text-foreground font-semibold text-sm">{c.name}</span>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.phone || "—"}</td>
-                <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.city || "—"}</td>
-                <td className="px-5 py-3.5">
-                  <Badge variant="secondary" className="text-[12px] bg-primary/20 text-primary border-0">
-                    {ORIGINS.find(o => o.value === c.origin)?.label || c.origin || "—"}
-                  </Badge>
-                </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex gap-1.5">
-                    {(c.tags || []).map(tag => (
-                      <span key={tag} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        tag === "VIP" ? "bg-warning/20 text-warning" : "bg-secondary text-muted-foreground"
-                      }`}>{tag}</span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-accent font-bold text-sm">
-                  R${(c.ticket_medio || 0).toLocaleString("pt-BR")}
-                </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex gap-2">
-                    <button className="bg-primary/20 text-primary border-0 rounded-lg px-3 py-1.5 text-[12px] hover:bg-primary/30 transition-colors">Ver</button>
-                    <button className="bg-accent/20 text-accent border-0 rounded-lg px-3 py-1.5 text-[12px] hover:bg-accent/30 transition-colors">Chat</button>
-                  </div>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {["Cliente", "Telefone", "Cidade", "Origem", "Tags", "Ticket Médio", "Ações"].map(h => (
+                  <th key={h} className="px-5 py-3.5 text-left text-muted-foreground text-[12px] font-semibold uppercase tracking-wider">{h}</th>
+                ))}
               </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">Nenhum cliente encontrado</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((c) => (
+                <tr key={c.id} className="border-b border-border/20 hover:bg-border/40 transition-colors cursor-pointer" onClick={() => openDetail(c.id)}>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-[11px] font-bold text-white">
+                        {c.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                      </div>
+                      <span className="text-foreground font-semibold text-sm">{c.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.phone || "—"}</td>
+                  <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.city || "—"}</td>
+                  <td className="px-5 py-3.5">
+                    <Badge variant="secondary" className="text-[12px] bg-primary/20 text-primary border-0">
+                      {ORIGINS.find(o => o.value === c.origin)?.label || c.origin || "—"}
+                    </Badge>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex gap-1.5">
+                      {(c.tags || []).map(tag => (
+                        <span key={tag} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                          tag === "VIP" ? "bg-warning/20 text-warning" : "bg-secondary text-muted-foreground"
+                        }`}>{tag}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-accent font-bold text-sm">R${(c.ticket_medio || 0).toLocaleString("pt-BR")}</td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => openDetail(c.id)} className="bg-primary/20 text-primary border-0 rounded-lg px-3 py-1.5 text-[12px] hover:bg-primary/30 transition-colors">Ver</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">Nenhum cliente encontrado</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      <ClientDetailDrawer clientId={selectedClientId} open={drawerOpen} onOpenChange={setDrawerOpen} onUpdate={fetchClients} />
     </div>
   );
 }

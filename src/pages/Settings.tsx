@@ -6,11 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Save, Building2, User, Palette, Users, Shield } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Save, Building2, User, Palette, Users, Shield, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 interface TeamMember { user_id: string; name: string; email: string; role: string; }
-
 const ROLE_LABELS: Record<string, string> = { admin: "Administrador", gerente: "Gerente", vendedor: "Vendedor", atendimento: "Atendimento" };
 
 export default function Settings() {
@@ -21,6 +26,9 @@ export default function Settings() {
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: "", password: "", name: "", role: "vendedor" });
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -58,6 +66,43 @@ export default function Settings() {
     if (error) toast.error("Erro ao atualizar"); else toast.success("Perfil atualizado!");
   };
 
+  const inviteMember = async () => {
+    if (!tenantId) return;
+    setInviting(true);
+    const { error } = await supabase.auth.signUp({
+      email: inviteForm.email,
+      password: inviteForm.password,
+      options: { data: { name: inviteForm.name, tenant_id: tenantId } },
+    });
+    setInviting(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Membro convidado! Ele receberá um email de confirmação.");
+      setInviteOpen(false);
+      setInviteForm({ email: "", password: "", name: "", role: "vendedor" });
+      // Refresh team
+      const [{ data: profiles }, { data: roles }] = await Promise.all([
+        supabase.from("profiles").select("user_id, name, email").eq("tenant_id", tenantId),
+        supabase.from("user_roles").select("user_id, role").eq("tenant_id", tenantId),
+      ]);
+      if (profiles && roles) {
+        const roleMap: Record<string, string> = {};
+        roles.forEach((r: any) => { roleMap[r.user_id] = r.role; });
+        setTeam(profiles.map((p: any) => ({ ...p, role: roleMap[p.user_id] || "vendedor" })));
+      }
+    }
+  };
+
+  const changeRole = async (userId: string, newRole: string) => {
+    if (!tenantId) return;
+    const { error } = await supabase.from("user_roles").update({ role: newRole as any }).eq("user_id", userId).eq("tenant_id", tenantId);
+    if (error) toast.error("Erro ao alterar role");
+    else {
+      toast.success("Role atualizado!");
+      setTeam(prev => prev.map(m => m.user_id === userId ? { ...m, role: newRole } : m));
+    }
+  };
+
   const tabs = [
     { key: "profile", label: "Perfil", icon: User },
     ...(isAdmin ? [
@@ -68,8 +113,7 @@ export default function Settings() {
 
   return (
     <div className="p-7 space-y-6 animate-fade-in">
-      {/* Tabs */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={`px-4 py-2 rounded-[10px] text-[13px] font-semibold transition-all border flex items-center gap-1.5 ${
@@ -118,7 +162,10 @@ export default function Settings() {
 
       {activeTab === "team" && isAdmin && (
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
-          <h3 className="text-foreground font-bold text-base flex items-center gap-2"><Shield className="h-4 w-4" /> Equipe</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground font-bold text-base flex items-center gap-2"><Shield className="h-4 w-4" /> Equipe</h3>
+            <Button size="sm" className="gap-1.5" onClick={() => setInviteOpen(true)}><UserPlus className="h-4 w-4" /> Convidar</Button>
+          </div>
           {team.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6">Nenhum membro</p>
           ) : team.map(m => (
@@ -127,9 +174,45 @@ export default function Settings() {
                 <div className="w-9 h-9 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-white">{m.name.charAt(0).toUpperCase()}</div>
                 <div><p className="text-sm font-semibold text-foreground">{m.name}</p><p className="text-xs text-muted-foreground">{m.email}</p></div>
               </div>
-              <Badge variant="outline" className="border-border text-muted-foreground">{ROLE_LABELS[m.role] || m.role}</Badge>
+              {m.user_id === user?.id ? (
+                <Badge variant="outline" className="border-border text-muted-foreground">{ROLE_LABELS[m.role] || m.role}</Badge>
+              ) : (
+                <Select value={m.role} onValueChange={v => changeRole(m.user_id, v)}>
+                  <SelectTrigger className="w-36 bg-background border-border"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Administrador</SelectItem>
+                    <SelectItem value="gerente">Gerente</SelectItem>
+                    <SelectItem value="vendedor">Vendedor</SelectItem>
+                    <SelectItem value="atendimento">Atendimento</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           ))}
+
+          <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Convidar Membro</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2"><Label>Nome *</Label><Input value={inviteForm.name} onChange={e => setInviteForm({ ...inviteForm, name: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Email *</Label><Input type="email" value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Senha Inicial *</Label><Input type="password" value={inviteForm.password} onChange={e => setInviteForm({ ...inviteForm, password: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Role</Label>
+                  <Select value={inviteForm.role} onValueChange={v => setInviteForm({ ...inviteForm, role: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="vendedor">Vendedor</SelectItem>
+                      <SelectItem value="atendimento">Atendimento</SelectItem>
+                      <SelectItem value="gerente">Gerente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={inviteMember} disabled={inviting || !inviteForm.email || !inviteForm.name || !inviteForm.password} className="w-full">
+                  {inviting ? "Convidando..." : "Enviar Convite"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </div>

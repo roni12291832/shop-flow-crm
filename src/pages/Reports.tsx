@@ -72,7 +72,7 @@ export default function Reports() {
   return (
     <div className="p-7 space-y-6 animate-fade-in">
       {/* Summary */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Receita Total", value: `R$ ${totals.revenue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, icon: DollarSign, color: "hsl(var(--chart-2))" },
           { label: "Vendas Fechadas", value: totals.deals, icon: TrendingUp, color: "hsl(var(--chart-1))" },
