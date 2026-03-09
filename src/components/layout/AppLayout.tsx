@@ -18,6 +18,8 @@ const PAGE_TITLES: Record<string, { title: string; sub: string }> = {
   "/reports": { title: "Relatórios", sub: "Análise de Dados" },
   "/notifications": { title: "Notificações", sub: "Alertas do Sistema" },
   "/settings": { title: "Configurações", sub: "Personalização" },
+  "/metas": { title: "Metas", sub: "Controle de Metas e Vendas" },
+  "/metas/configurar": { title: "Configurar Metas", sub: "Definição de Metas por Período" },
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {

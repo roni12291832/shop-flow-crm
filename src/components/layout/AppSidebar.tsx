@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ const navItems = [
   { icon: Users, label: "Clientes", path: "/clients" },
   { icon: Kanban, label: "Pipeline", path: "/pipeline" },
   { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },
+  { icon: Target, label: "Metas", path: "/metas" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
