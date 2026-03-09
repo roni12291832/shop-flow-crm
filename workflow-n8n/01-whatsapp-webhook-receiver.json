@@ -1,0 +1,115 @@
+{
+  "name": "01 - WhatsApp Webhook Receiver",
+  "description": "Recebe mensagens do WhatsApp via webhook e salva a conversa e mensagem no banco de dados do CRM.",
+  "nodes": [
+    {
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "onReceived"
+      },
+      "notes": "Endpoint que recebe as mensagens do WhatsApp Business API (Evolution API, Z-API, etc). Configure a URL deste webhook no painel da sua API de WhatsApp."
+    },
+    {
+      "name": "Extrair Dados",
+      "type": "n8n-nodes-base.set",
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "phone", "value": "={{$json.data.key.remoteJid.replace('@s.whatsapp.net','')}}" },
+            { "name": "message", "value": "={{$json.data.message.conversation || $json.data.message.extendedTextMessage?.text || ''}}" },
+            { "name": "message_type", "value": "={{$json.data.messageType}}" },
+            { "name": "sender_name", "value": "={{$json.data.pushName || 'Desconhecido'}}" }
+          ]
+        }
+      },
+      "notes": "Extrai telefone, mensagem, tipo e nome do remetente. Adapte os campos conforme sua API de WhatsApp."
+    },
+    {
+      "name": "Buscar Cliente no Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients?phone=eq.{{$node['Extrair Dados'].json.phone}}&select=id,name,tenant_id",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
+        }
+      },
+      "notes": "Busca o cliente pelo telefone no banco. Se não encontrar, o próximo nó cria automaticamente."
+    },
+    {
+      "name": "Cliente Existe?",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{$json.length}}", "operation": "larger", "value2": 0 }]
+        }
+      }
+    },
+    {
+      "name": "Criar Cliente Automaticamente",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        "body": {
+          "name": "={{$node['Extrair Dados'].json.sender_name}}",
+          "phone": "={{$node['Extrair Dados'].json.phone}}",
+          "origin": "whatsapp",
+          "tenant_id": "SEU_TENANT_ID_PADRAO"
+        }
+      },
+      "notes": "Cria um novo cliente quando o telefone não é encontrado. Substitua SEU_TENANT_ID_PADRAO pelo ID do seu tenant."
+    },
+    {
+      "name": "Salvar Mensagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/activities",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "type": "whatsapp_message_received",
+          "description": "={{$node['Extrair Dados'].json.message}}",
+          "client_id": "={{$node['Buscar Cliente no Supabase'].json[0].id}}",
+          "tenant_id": "={{$node['Buscar Cliente no Supabase'].json[0].tenant_id}}",
+          "user_id": "SYSTEM_USER_ID"
+        }
+      },
+      "notes": "Registra a mensagem como atividade no CRM."
+    },
+    {
+      "name": "Criar Notificação",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/notifications",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "Nova mensagem WhatsApp",
+          "message": "={{$node['Extrair Dados'].json.sender_name}}: {{$node['Extrair Dados'].json.message}}",
+          "tenant_id": "={{$node['Buscar Cliente no Supabase'].json[0].tenant_id}}",
+          "user_id": "RESPONSAVEL_USER_ID"
+        }
+      },
+      "notes": "Cria notificação no CRM para o vendedor responsável."
+    }
+  ]
+}

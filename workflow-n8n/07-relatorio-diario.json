@@ -1,0 +1,73 @@
+{
+  "name": "07 - Relatório Diário",
+  "description": "Todos os dias às 8h, gera um resumo de métricas do dia anterior e envia por email ou WhatsApp para os gerentes.",
+  "nodes": [
+    {
+      "name": "Cron - 8h todo dia",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }] }
+      }
+    },
+    {
+      "name": "Buscar Métricas do Dia",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/opportunities?created_at=gte.{{$now.minus(1,'days').startOf('day').toISO()}}&select=id,stage,estimated_value",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
+        }
+      }
+    },
+    {
+      "name": "Buscar Novos Clientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients?created_at=gte.{{$now.minus(1,'days').startOf('day').toISO()}}&select=id",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
+        }
+      }
+    },
+    {
+      "name": "Calcular Métricas",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const opps = $input.first().json;\nconst clients = $('Buscar Novos Clientes').first().json;\nconst closed = Array.isArray(opps) ? opps.filter(o => o.stage === 'venda_fechada') : [];\nconst revenue = closed.reduce((s, o) => s + (o.estimated_value || 0), 0);\nreturn [{ json: {\n  total_opps: Array.isArray(opps) ? opps.length : 0,\n  closed_deals: closed.length,\n  revenue,\n  new_clients: Array.isArray(clients) ? clients.length : 0\n}}];"
+      }
+    },
+    {
+      "name": "Montar Mensagem",
+      "type": "n8n-nodes-base.set",
+      "parameters": {
+        "values": {
+          "string": [{
+            "name": "report",
+            "value": "📊 *Relatório Diário - StoreCRM*\n\n🆕 Novos leads: {{$json.total_opps}}\n💰 Vendas fechadas: {{$json.closed_deals}}\n💵 Receita: R$ {{$json.revenue}}\n👥 Novos clientes: {{$json.new_clients}}\n\n_Gerado automaticamente pelo CRM_"
+          }]
+        }
+      }
+    },
+    {
+      "name": "Enviar via WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WHATSAPP_API_URL}}/message/sendText/default",
+        "headers": {
+          "apikey": "={{$env.WHATSAPP_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "number": "NUMERO_DO_GERENTE@s.whatsapp.net",
+          "text": "={{$json.report}}"
+        }
+      },
+      "notes": "Envia relatório diário por WhatsApp para o gerente. Substitua NUMERO_DO_GERENTE pelo número real."
+    }
+  ]
+}
