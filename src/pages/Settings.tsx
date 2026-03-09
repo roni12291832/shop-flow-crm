@@ -29,6 +29,7 @@ export default function Settings() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: "", password: "", name: "", role: "vendedor" });
   const [inviting, setInviting] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!tenantId) return;
