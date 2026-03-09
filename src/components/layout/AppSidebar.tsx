@@ -41,6 +41,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { profile, roles, signOut, tenantId, user } = useAuth();
   const [chatCount, setChatCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
+  const [tenantInfo, setTenantInfo] = useState<{ company_name: string; logo_url: string | null } | null>(null);
 
   const userRole = roles.length > 0 ? ROLE_LABELS[roles[0]] || roles[0] : "Usuário";
 
