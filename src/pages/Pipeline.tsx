@@ -4,7 +4,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import { LossReasonDialog } from "@/components/crm/LossReasonDialog";
 
 const STAGES = [
   { value: "lead_recebido", label: "Lead Recebido", color: "hsl(var(--chart-1))" },
@@ -33,6 +33,10 @@ export default function Pipeline() {
   const [clients, setClients] = useState<Client[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ title: "", client_id: "", estimated_value: "", stage: "lead_recebido" });
+  const [lossDialogOpen, setLossDialogOpen] = useState(false);
+  const [pendingLossId, setPendingLossId] = useState<string | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ id: "", title: "", estimated_value: "" });
 
   const fetchData = async () => {
     if (!tenantId) return;
@@ -60,16 +64,43 @@ export default function Pipeline() {
   };
 
   const moveStage = async (oppId: string, newStage: string) => {
+    if (newStage === "perdido") {
+      setPendingLossId(oppId);
+      setLossDialogOpen(true);
+      return;
+    }
     await supabase.from("opportunities").update({ stage: newStage as any }).eq("id", oppId);
     fetchData();
+  };
+
+  const confirmLoss = async (reason: string, notes: string) => {
+    if (!pendingLossId) return;
+    await supabase.from("opportunities").update({
+      stage: "perdido" as any, loss_reason: reason as any, loss_notes: notes || null,
+    }).eq("id", pendingLossId);
+    setLossDialogOpen(false);
+    setPendingLossId(null);
+    toast.info("Oportunidade marcada como perdida");
+    fetchData();
+  };
+
+  const openEdit = (opp: Opportunity) => {
+    setEditForm({ id: opp.id, title: opp.title, estimated_value: String(opp.estimated_value) });
+    setEditDialogOpen(true);
+  };
+
+  const handleEdit = async () => {
+    const { error } = await supabase.from("opportunities").update({
+      title: editForm.title, estimated_value: parseFloat(editForm.estimated_value) || 0,
+    }).eq("id", editForm.id);
+    if (error) toast.error("Erro ao atualizar");
+    else { toast.success("Atualizado!"); setEditDialogOpen(false); fetchData(); }
   };
 
   return (
     <div className="p-7 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-muted-foreground text-sm">{opportunities.length} oportunidades ativas</p>
-        </div>
+        <p className="text-muted-foreground text-sm">{opportunities.length} oportunidades ativas</p>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> Nova Oportunidade</Button></DialogTrigger>
           <DialogContent>
@@ -89,7 +120,6 @@ export default function Pipeline() {
         </Dialog>
       </div>
 
-      {/* Kanban */}
       <div className="flex gap-3.5 overflow-x-auto pb-4">
         {STAGES.map((stage) => {
           const stageOpps = opportunities.filter((o) => o.stage === stage.value);
@@ -103,15 +133,14 @@ export default function Pipeline() {
               <div className="text-muted-foreground text-[12px] mb-4">R${stageTotal.toLocaleString("pt-BR")}</div>
               <div className="space-y-2">
                 {stageOpps.slice(0, 5).map((opp) => (
-                  <div key={opp.id} className="bg-background border border-border rounded-[10px] p-3 cursor-grab hover:border-primary/30 transition-colors">
+                  <div key={opp.id} className="bg-background border border-border rounded-[10px] p-3 cursor-pointer hover:border-primary/30 transition-colors" onClick={() => openEdit(opp)}>
                     <div className="text-foreground text-[12px] font-semibold mb-1">{opp.title}</div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground text-[11px]">{opp.client_name}</span>
                       <span className="text-[11px] font-semibold" style={{ color: stage.color }}>R${Number(opp.estimated_value).toLocaleString("pt-BR")}</span>
                     </div>
-                    {/* Quick move */}
-                    <div className="flex gap-1 flex-wrap mt-2">
-                      {STAGES.filter(s => s.value !== opp.stage && s.value !== "perdido").slice(0, 3).map(s => (
+                    <div className="flex gap-1 flex-wrap mt-2" onClick={e => e.stopPropagation()}>
+                      {STAGES.filter(s => s.value !== opp.stage).slice(0, 3).map(s => (
                         <button key={s.value} onClick={() => moveStage(opp.id, s.value)}
                           className="text-[9px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors">
                           {s.label}
@@ -120,14 +149,24 @@ export default function Pipeline() {
                     </div>
                   </div>
                 ))}
-                <button className="w-full border border-dashed border-border rounded-[10px] py-2 text-muted-foreground text-[12px] hover:border-primary/40 transition-colors">
-                  + Adicionar
-                </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      <LossReasonDialog open={lossDialogOpen} onOpenChange={setLossDialogOpen} onConfirm={confirmLoss} />
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Editar Oportunidade</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label>Título</Label><Input value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></div>
+            <div className="space-y-2"><Label>Valor (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
+            <Button onClick={handleEdit} className="w-full">Salvar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
