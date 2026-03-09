@@ -1,0 +1,112 @@
+{
+  "name": "08 - WhatsApp Lead Auto-Pipeline (UAZAPI)",
+  "description": "Recebe webhooks da UAZAPI quando uma nova mensagem WhatsApp chega e cria automaticamente o lead no CRM como 'Lead Recebido'.",
+  "nodes": [
+    {
+      "name": "Webhook UAZAPI",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "uazapi-webhook",
+        "responseMode": "onReceived"
+      },
+      "notes": "Configure este webhook na UAZAPI em Configurações > Webhooks. URL: https://seu-n8n.com/webhook/uazapi-webhook. A UAZAPI envia dados mesmo se o celular estiver offline (mensagens ficam em fila)."
+    },
+    {
+      "name": "Extrair Dados UAZAPI",
+      "type": "n8n-nodes-base.set",
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "phone", "value": "={{$json.data?.key?.remoteJid?.replace('@s.whatsapp.net','') || $json.remoteJid?.replace('@s.whatsapp.net','')}}" },
+            { "name": "message", "value": "={{$json.data?.message?.conversation || $json.data?.message?.extendedTextMessage?.text || $json.message || ''}}" },
+            { "name": "sender_name", "value": "={{$json.data?.pushName || $json.pushName || 'Lead WhatsApp'}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Buscar Cliente Existente",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients?phone=eq.{{$node['Extrair Dados UAZAPI'].json.phone}}&select=id,name,tenant_id",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
+        }
+      }
+    },
+    {
+      "name": "Cliente Existe?",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{$json.length}}", "operation": "larger", "value2": 0 }]
+        }
+      }
+    },
+    {
+      "name": "Criar Novo Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        "body": {
+          "name": "={{$node['Extrair Dados UAZAPI'].json.sender_name}}",
+          "phone": "={{$node['Extrair Dados UAZAPI'].json.phone}}",
+          "origin": "whatsapp",
+          "tenant_id": "SEU_TENANT_ID"
+        }
+      },
+      "notes": "Cria o lead automaticamente. Substitua SEU_TENANT_ID pelo ID do seu tenant. Os dados persistem mesmo se o celular desconectar."
+    },
+    {
+      "name": "Criar Oportunidade Lead Recebido",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/opportunities",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "WhatsApp - {{$node['Extrair Dados UAZAPI'].json.sender_name}}",
+          "client_id": "={{$json[0].id || $node['Criar Novo Lead'].json[0].id}}",
+          "tenant_id": "SEU_TENANT_ID",
+          "stage": "lead_recebido",
+          "estimated_value": 0
+        }
+      },
+      "notes": "Cria automaticamente uma oportunidade no estágio 'Lead Recebido' do Fluxo CRM. O lead aparece imediatamente no Kanban."
+    },
+    {
+      "name": "Notificar Equipe",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/notifications",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "🆕 Novo Lead WhatsApp",
+          "message": "{{$node['Extrair Dados UAZAPI'].json.sender_name}} ({{$node['Extrair Dados UAZAPI'].json.phone}}) enviou mensagem no WhatsApp",
+          "tenant_id": "SEU_TENANT_ID",
+          "user_id": "ID_DO_RESPONSAVEL"
+        }
+      }
+    }
+  ],
+  "notes": "IMPORTANTE: Os leads persistem no banco de dados independente do status de conexão do celular. A UAZAPI mantém a sessão do WhatsApp Web nos seus servidores, então mesmo que o celular fique offline temporariamente, ao reconectar as mensagens são processadas normalmente."
+}
