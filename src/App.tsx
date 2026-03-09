@@ -42,6 +42,23 @@ function ProtectedRoute({ children, noLayout }: { children: React.ReactNode; noL
   return <AppLayout>{children}</AppLayout>;
 }
 
+/** Route only for admin/gerente — redirects vendedor to /vendedor */
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading, roles } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/auth" replace />;
+  // If user is ONLY vendedor (no admin/gerente role), redirect to seller mode
+  const isOnlySeller = roles.length > 0 && roles.every(r => r === "vendedor" || r === "atendimento");
+  if (isOnlySeller) return <Navigate to="/vendedor" replace />;
+  return <AppLayout>{children}</AppLayout>;
+}
+
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -49,27 +66,42 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Auto-redirect vendedor-only users from "/" to "/vendedor" */
+function HomeRedirect() {
+  const { roles, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+  const isOnlySeller = roles.length > 0 && roles.every(r => r === "vendedor" || r === "atendimento");
+  if (isOnlySeller) return <Navigate to="/vendedor" replace />;
+  return <AppLayout><Dashboard /></AppLayout>;
+}
+
 const AppRoutes = () => (
   <Routes>
     <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
-    <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-    <Route path="/clients" element={<ProtectedRoute><Clients /></ProtectedRoute>} />
-    <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
-    <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-    <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-    <Route path="/ranking" element={<ProtectedRoute><Ranking /></ProtectedRoute>} />
-    <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+    <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
+    <Route path="/clients" element={<AdminRoute><Clients /></AdminRoute>} />
+    <Route path="/pipeline" element={<AdminRoute><Pipeline /></AdminRoute>} />
+    <Route path="/tasks" element={<AdminRoute><Tasks /></AdminRoute>} />
+    <Route path="/chat" element={<AdminRoute><Chat /></AdminRoute>} />
+    <Route path="/ranking" element={<AdminRoute><Ranking /></AdminRoute>} />
+    <Route path="/reports" element={<AdminRoute><Reports /></AdminRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
-    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-    <Route path="/metas" element={<ProtectedRoute><Goals /></ProtectedRoute>} />
-    <Route path="/metas/configurar" element={<ProtectedRoute><GoalsConfig /></ProtectedRoute>} />
-    <Route path="/regua-relacionamento" element={<ProtectedRoute><RelationshipRules /></ProtectedRoute>} />
-    <Route path="/nps" element={<ProtectedRoute><NpsDashboard /></ProtectedRoute>} />
-    <Route path="/nps/configurar" element={<ProtectedRoute><NpsConfig /></ProtectedRoute>} />
+    <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+    <Route path="/metas" element={<AdminRoute><Goals /></AdminRoute>} />
+    <Route path="/metas/configurar" element={<AdminRoute><GoalsConfig /></AdminRoute>} />
+    <Route path="/regua-relacionamento" element={<AdminRoute><RelationshipRules /></AdminRoute>} />
+    <Route path="/nps" element={<AdminRoute><NpsDashboard /></AdminRoute>} />
+    <Route path="/nps/configurar" element={<AdminRoute><NpsConfig /></AdminRoute>} />
     <Route path="/nps/:token" element={<NpsPublic />} />
     <Route path="/vendedor" element={<ProtectedRoute noLayout><SellerMode /></ProtectedRoute>} />
     <Route path="/admin" element={<ProtectedRoute noLayout><AdminPanel /></ProtectedRoute>} />
-    <Route path="/whatsapp-connect" element={<ProtectedRoute><WhatsAppConnect /></ProtectedRoute>} />
+    <Route path="/whatsapp-connect" element={<AdminRoute><WhatsAppConnect /></AdminRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
