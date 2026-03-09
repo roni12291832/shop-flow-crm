@@ -19,6 +19,9 @@ import Goals from "./pages/Goals";
 import GoalsConfig from "./pages/GoalsConfig";
 import RelationshipRules from "./pages/RelationshipRules";
 import SpecialDates from "./pages/SpecialDates";
+import NpsDashboard from "./pages/NpsDashboard";
+import NpsConfig from "./pages/NpsConfig";
+import NpsPublic from "./pages/NpsPublic";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
