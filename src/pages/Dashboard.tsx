@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Users, TrendingUp, DollarSign, Target, AlertTriangle, Info, Clock, User, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BirthdayDashboardWidget } from "@/components/datas/BirthdayDashboardWidget";
+import { NpsDashboardWidget } from "@/components/nps/NpsDashboardWidget";
 
 const STAGE_LABELS: Record<string, string> = {
   lead_recebido: "Lead Recebido", contato_iniciado: "Contato Iniciado",
