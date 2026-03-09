@@ -12,7 +12,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Save, Building2, User, Palette, Users, Shield, UserPlus } from "lucide-react";
+import { Save, Building2, User, Palette, Users, Shield, UserPlus, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface TeamMember { user_id: string; name: string; email: string; role: string; }
