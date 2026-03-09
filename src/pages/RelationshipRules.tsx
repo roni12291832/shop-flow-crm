@@ -121,7 +121,7 @@ export default function RelationshipRules() {
     const { id, tenant_id, ...rest } = rule;
     const { error } = await supabase
       .from("relationship_rules")
-      .insert({ ...rest, tenant_id: tenantId, name: `${rest.name} (cópia)`, active: false });
+      .insert([{ ...rest, tenant_id: tenantId, name: `${rest.name} (cópia)`, active: false }]);
 
     if (error) { toast.error("Erro ao duplicar"); return; }
     toast.success("Régua duplicada!");
