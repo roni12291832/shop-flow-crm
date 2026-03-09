@@ -119,6 +119,14 @@ export default function Tasks() {
                   <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2"><Label>Responsável</Label>
+                <Select value={form.responsible_id} onValueChange={(v) => setForm({ ...form, responsible_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Geral (todos)" /></SelectTrigger>
+                  <SelectContent>
+                    {members.map(m => <SelectItem key={m.user_id} value={m.user_id}>{m.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button type="submit" className="w-full">Criar Tarefa</Button>
             </form>
           </DialogContent>
