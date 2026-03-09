@@ -53,6 +53,7 @@ export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [profileMap, setProfileMap] = useState<Record<string, string>>({});
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [aiMode, setAiMode] = useState(false);
