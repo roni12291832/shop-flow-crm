@@ -166,6 +166,7 @@ export default function Tasks() {
                 <div className="flex items-center gap-4 mt-1.5 text-[12px] text-muted-foreground">
                   {task.due_date && <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{new Date(task.due_date).toLocaleDateString("pt-BR")}</span>}
                   {client && <span className="flex items-center gap-1"><User className="h-3 w-3" />{client.name}</span>}
+                  <span className="italic">{task.responsible_id ? members.find(m => m.user_id === task.responsible_id)?.name || "—" : "Geral"}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
