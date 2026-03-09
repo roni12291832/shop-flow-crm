@@ -179,6 +179,50 @@ export type Database = {
           },
         ]
       }
+      goals: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          end_date: string
+          id: string
+          period_type: Database["public"]["Enums"]["goal_period_type"]
+          start_date: string
+          target_value: number
+          tenant_id: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          end_date: string
+          id?: string
+          period_type?: Database["public"]["Enums"]["goal_period_type"]
+          start_date: string
+          target_value?: number
+          tenant_id: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          end_date?: string
+          id?: string
+          period_type?: Database["public"]["Enums"]["goal_period_type"]
+          start_date?: string
+          target_value?: number
+          tenant_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "goals_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
@@ -360,6 +404,60 @@ export type Database = {
           },
         ]
       }
+      sales_entries: {
+        Row: {
+          created_at: string
+          customer_id: string | null
+          id: string
+          notes: string | null
+          payment_method: Database["public"]["Enums"]["payment_method"]
+          sold_at: string
+          status: Database["public"]["Enums"]["sale_status"]
+          tenant_id: string
+          user_id: string
+          value: number
+        }
+        Insert: {
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          notes?: string | null
+          payment_method?: Database["public"]["Enums"]["payment_method"]
+          sold_at?: string
+          status?: Database["public"]["Enums"]["sale_status"]
+          tenant_id: string
+          user_id: string
+          value?: number
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          notes?: string | null
+          payment_method?: Database["public"]["Enums"]["payment_method"]
+          sold_at?: string
+          status?: Database["public"]["Enums"]["sale_status"]
+          tenant_id?: string
+          user_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_entries_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_entries_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           client_id: string | null
@@ -497,6 +595,7 @@ export type Database = {
         | "em_atendimento"
         | "aguardando"
         | "finalizada"
+      goal_period_type: "daily" | "weekly" | "monthly"
       lead_origin:
         | "whatsapp"
         | "instagram"
@@ -513,6 +612,13 @@ export type Database = {
         | "sem_resposta"
         | "outro"
       message_sender_type: "cliente" | "atendente" | "ia"
+      payment_method:
+        | "pix"
+        | "credito"
+        | "debito"
+        | "dinheiro"
+        | "boleto"
+        | "crediario"
       pipeline_stage:
         | "lead_recebido"
         | "contato_iniciado"
@@ -521,6 +627,7 @@ export type Database = {
         | "proposta_enviada"
         | "venda_fechada"
         | "perdido"
+      sale_status: "confirmado" | "pendente" | "cancelado"
       task_priority: "alta" | "media" | "baixa"
       task_status: "pendente" | "em_andamento" | "concluido"
     }
@@ -657,6 +764,7 @@ export const Constants = {
         "aguardando",
         "finalizada",
       ],
+      goal_period_type: ["daily", "weekly", "monthly"],
       lead_origin: [
         "whatsapp",
         "instagram",
@@ -675,6 +783,14 @@ export const Constants = {
         "outro",
       ],
       message_sender_type: ["cliente", "atendente", "ia"],
+      payment_method: [
+        "pix",
+        "credito",
+        "debito",
+        "dinheiro",
+        "boleto",
+        "crediario",
+      ],
       pipeline_stage: [
         "lead_recebido",
         "contato_iniciado",
@@ -684,6 +800,7 @@ export const Constants = {
         "venda_fechada",
         "perdido",
       ],
+      sale_status: ["confirmado", "pendente", "cancelado"],
       task_priority: ["alta", "media", "baixa"],
       task_status: ["pendente", "em_andamento", "concluido"],
     },
