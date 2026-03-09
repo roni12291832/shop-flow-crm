@@ -22,6 +22,7 @@ import SpecialDates from "./pages/SpecialDates";
 import NpsDashboard from "./pages/NpsDashboard";
 import NpsConfig from "./pages/NpsConfig";
 import NpsPublic from "./pages/NpsPublic";
+import SellerMode from "./pages/SellerMode";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
