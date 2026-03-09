@@ -175,26 +175,29 @@ export default function Settings() {
           <h3 className="text-foreground font-bold text-base">Dados da Empresa</h3>
           <div className="space-y-2"><Label>Nome da Empresa</Label><Input value={tenant.company_name} onChange={(e) => setTenant({ ...tenant, company_name: e.target.value })} /></div>
           <div className="space-y-2">
-            <Label>URL do Logo</Label>
-            <Input value={tenant.logo_url} onChange={(e) => setTenant({ ...tenant, logo_url: e.target.value })} placeholder="https://exemplo.com/logo.png" />
-            <p className="text-xs text-muted-foreground">
-              ⚠️ Use um link direto da imagem (terminando em .png, .jpg, .webp). Links de páginas web não funcionam. 
-              Dica: no Google Imagens, clique com botão direito na imagem → "Copiar endereço da imagem".
-            </p>
-            {tenant.logo_url && (
-              <div className="mt-2 p-3 border border-border rounded-xl bg-secondary/30">
-                <p className="text-xs text-muted-foreground mb-2">Preview:</p>
-                <img 
-                  src={tenant.logo_url} 
-                  alt="Logo preview" 
-                  className="h-16 max-w-[200px] object-contain"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  onLoad={(e) => { (e.target as HTMLImageElement).style.display = 'block'; }}
-                />
-                {tenant.logo_url && !tenant.logo_url.match(/\.(png|jpg|jpeg|gif|webp|svg|ico)(\?.*)?$/i) && (
-                  <p className="text-xs text-destructive mt-1">⚠️ Este link não parece ser de uma imagem direta. Verifique se termina com .png, .jpg, etc.</p>
-                )}
+            <Label>Logo da Empresa</Label>
+            {tenant.logo_url ? (
+              <div className="flex items-center gap-4 p-3 border border-border rounded-xl bg-secondary/30">
+                <img src={tenant.logo_url} alt="Logo" className="h-16 max-w-[200px] object-contain rounded" />
+                <div className="flex flex-col gap-2">
+                  <label className="cursor-pointer">
+                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                      <Upload className="h-3.5 w-3.5" /> Trocar
+                    </span>
+                  </label>
+                  <button onClick={removeLogo} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-destructive hover:bg-destructive/10 transition-colors">
+                    <X className="h-3.5 w-3.5" /> Remover
+                  </button>
+                </div>
               </div>
+            ) : (
+              <label className="cursor-pointer flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-border rounded-xl hover:border-primary/50 hover:bg-primary/5 transition-all">
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                <Upload className="h-8 w-8 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">{uploading ? "Enviando..." : "Clique para enviar o logo"}</span>
+                <span className="text-xs text-muted-foreground">PNG, JPG ou WEBP (máx 5MB)</span>
+              </label>
             )}
           </div>
           <Separator className="bg-border" />
