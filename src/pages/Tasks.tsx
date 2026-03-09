@@ -41,12 +41,14 @@ export default function Tasks() {
 
   const fetchData = async () => {
     if (!tenantId) return;
-    const [t, c] = await Promise.all([
+    const [t, c, m] = await Promise.all([
       supabase.from("tasks").select("*").eq("tenant_id", tenantId).order("due_date", { ascending: true, nullsFirst: false }),
       supabase.from("clients").select("id, name").eq("tenant_id", tenantId),
+      supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
     ]);
     if (t.data) setTasks(t.data as Task[]);
     if (c.data) setClients(c.data as Client[]);
+    if (m.data) setMembers(m.data as ProfileItem[]);
   };
 
   useEffect(() => { fetchData(); }, [tenantId]);
