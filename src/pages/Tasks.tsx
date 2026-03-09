@@ -26,8 +26,9 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
   baixa: { label: "Baixa", color: "hsl(var(--chart-1))" },
 };
 
-interface Task { id: string; title: string; description: string | null; status: string; priority: string; due_date: string | null; client_id: string | null; }
+interface Task { id: string; title: string; description: string | null; status: string; priority: string; due_date: string | null; client_id: string | null; responsible_id: string | null; }
 interface Client { id: string; name: string; }
+interface ProfileItem { user_id: string; name: string; }
 
 export default function Tasks() {
   const { tenantId, user } = useAuth();
