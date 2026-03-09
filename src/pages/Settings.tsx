@@ -51,6 +51,42 @@ export default function Settings() {
 
   useEffect(() => { if (profile) setProfileForm({ name: profile.name, email: profile.email }); }, [profile]);
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !tenantId) return;
+    if (!file.type.startsWith("image/")) { toast.error("Selecione um arquivo de imagem"); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("Arquivo muito grande (máx 5MB)"); return; }
+
+    setUploading(true);
+    const ext = file.name.split(".").pop();
+    const filePath = `${tenantId}/logo.${ext}`;
+
+    // Remove old logo if exists
+    await supabase.storage.from("logos").remove([filePath]);
+
+    const { error: uploadError } = await supabase.storage.from("logos").upload(filePath, file, { upsert: true });
+    if (uploadError) { toast.error("Erro no upload: " + uploadError.message); setUploading(false); return; }
+
+    const { data: urlData } = supabase.storage.from("logos").getPublicUrl(filePath);
+    const logoUrl = urlData.publicUrl + "?t=" + Date.now(); // cache bust
+
+    const { error } = await supabase.from("tenants").update({ logo_url: logoUrl }).eq("id", tenantId);
+    setUploading(false);
+    if (error) { toast.error("Erro ao salvar URL do logo"); return; }
+    
+    setTenant(prev => ({ ...prev, logo_url: logoUrl }));
+    toast.success("Logo atualizado com sucesso!");
+  };
+
+  const removeLogo = async () => {
+    if (!tenantId) return;
+    setSaving(true);
+    await supabase.from("tenants").update({ logo_url: null }).eq("id", tenantId);
+    setTenant(prev => ({ ...prev, logo_url: "" }));
+    setSaving(false);
+    toast.success("Logo removido!");
+  };
+
   const saveTenant = async () => {
     if (!tenantId || !isAdmin) return;
     setSaving(true);
