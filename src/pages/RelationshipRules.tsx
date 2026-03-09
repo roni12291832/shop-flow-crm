@@ -39,7 +39,7 @@ export default function RelationshipRules() {
   const [executionCounts, setExecutionCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<(Partial<Rule> & { id?: string }) | undefined>();
+  const [editingRule, setEditingRule] = useState<any>();
 
   const canManage = hasRole("admin") || hasRole("gerente");
 

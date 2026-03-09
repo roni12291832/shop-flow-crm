@@ -77,7 +77,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
   const previewMessage = () => {
     let msg = form.message_template;
     Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
-      msg = msg.replaceAll(key, val);
+      msg = msg.split(key).join(val);
     });
     return msg;
   };
