@@ -1,31 +1,78 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Administrador",
+  gerente: "Gerente",
+  vendedor: "Vendedor",
+  atendimento: "Atendimento",
+};
 
 const navItems = [
   { icon: Home, label: "Dashboard", path: "/" },
   { icon: Users, label: "Clientes", path: "/clients" },
   { icon: Kanban, label: "Pipeline", path: "/pipeline" },
-  { icon: MessageSquare, label: "WhatsApp", path: "/chat", badge: true },
+  { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
-  { icon: Bell, label: "Notificações", path: "/notifications" },
+  { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" },
 ];
 
-export function AppSidebar() {
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, signOut } = useAuth();
+  const { profile, roles, signOut, tenantId, user } = useAuth();
+  const [chatCount, setChatCount] = useState(0);
+  const [notifCount, setNotifCount] = useState(0);
+
+  const userRole = roles.length > 0 ? ROLE_LABELS[roles[0]] || roles[0] : "Usuário";
+
+  useEffect(() => {
+    if (!tenantId || !user) return;
+    const fetchCounts = async () => {
+      const [{ count: convCount }, { count: nCount }] = await Promise.all([
+        supabase.from("conversations").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "aberta"),
+        supabase.from("notifications").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("read", false),
+      ]);
+      setChatCount(convCount || 0);
+      setNotifCount(nCount || 0);
+    };
+    fetchCounts();
+
+    const channel = supabase
+      .channel("sidebar-badges")
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => fetchCounts())
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, () => fetchCounts())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [tenantId, user]);
+
+  const handleNav = (path: string) => {
+    navigate(path);
+    onNavigate?.();
+  };
+
+  const getBadge = (key?: string) => {
+    if (key === "chat" && chatCount > 0) return chatCount;
+    if (key === "notifications" && notifCount > 0) return notifCount;
+    return 0;
+  };
 
   return (
-    <div className="flex flex-col h-screen w-[220px] bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex-shrink-0">
+    <div className="flex flex-col h-full w-[220px] bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
       {/* Logo */}
       <div className="px-5 py-6 border-b border-sidebar-border">
         <div className="flex items-center gap-2.5">
@@ -44,10 +91,11 @@ export function AppSidebar() {
         <nav className="space-y-1">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
+            const badge = getBadge(item.badgeKey);
             return (
               <button
                 key={item.path}
-                onClick={() => navigate(item.path)}
+                onClick={() => handleNav(item.path)}
                 className={cn(
                   "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-150",
                   isActive
@@ -57,9 +105,9 @@ export function AppSidebar() {
               >
                 <item.icon className="h-4 w-4" />
                 <span className={cn(isActive && "font-bold")}>{item.label}</span>
-                {item.badge && (
+                {badge > 0 && (
                   <span className="ml-auto bg-accent text-accent-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
-                    3
+                    {badge}
                   </span>
                 )}
               </button>
@@ -68,10 +116,10 @@ export function AppSidebar() {
         </nav>
       </ScrollArea>
 
-      {/* Bottom - Settings & User */}
+      {/* Bottom */}
       <div className="px-3 pb-4 space-y-1 border-t border-sidebar-border pt-3">
         <button
-          onClick={() => navigate("/settings")}
+          onClick={() => handleNav("/settings")}
           className={cn(
             "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
             location.pathname === "/settings"
@@ -91,7 +139,7 @@ export function AppSidebar() {
             <p className="text-[13px] font-semibold text-foreground truncate">
               {profile?.name || "Usuário"}
             </p>
-            <p className="text-[11px] text-muted-foreground">Gerente</p>
+            <p className="text-[11px] text-muted-foreground">{userRole}</p>
           </div>
           <Button
             variant="ghost"
@@ -103,6 +151,32 @@ export function AppSidebar() {
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function AppSidebar() {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <Button variant="ghost" size="icon" className="fixed top-3 left-3 z-50 md:hidden">
+            <Menu className="h-5 w-5" />
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="p-0 w-[220px]">
+          <SidebarContent onNavigate={() => setOpen(false)} />
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  return (
+    <div className="flex-shrink-0 hidden md:block">
+      <SidebarContent />
     </div>
   );
 }
