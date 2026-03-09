@@ -75,6 +75,15 @@ export default function Chat() {
       .select("id, name, phone, ticket_medio, origin")
       .eq("tenant_id", tenantId);
 
+    const { data: profilesData } = await supabase
+      .from("profiles")
+      .select("user_id, name")
+      .eq("tenant_id", tenantId);
+
+    const pMap: Record<string, string> = {};
+    (profilesData || []).forEach((p: any) => { pMap[p.user_id] = p.name; });
+    setProfileMap(pMap);
+
     const clientMap: Record<string, string> = {};
     (clientsData || []).forEach((c: any) => { clientMap[c.id] = c.name; });
     setClients((clientsData || []) as Client[]);
