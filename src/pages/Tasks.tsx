@@ -59,10 +59,10 @@ export default function Tasks() {
     const { error } = await supabase.from("tasks").insert({
       tenant_id: tenantId, title: form.title, description: form.description || null,
       due_date: form.due_date || null, client_id: form.client_id || null,
-      responsible_id: user.id, status: form.status as any, priority: form.priority as any,
+      responsible_id: form.responsible_id || null, status: form.status as any, priority: form.priority as any,
     });
     if (error) toast.error("Erro ao criar tarefa");
-    else { toast.success("Tarefa criada!"); setDialogOpen(false); setForm({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media" }); fetchData(); }
+    else { toast.success("Tarefa criada!"); setDialogOpen(false); setForm({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media", responsible_id: "" }); fetchData(); }
   };
 
   const updateStatus = async (id: string, status: string) => {
