@@ -1,36 +1,22 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  BarChart3,
-  Users,
-  Kanban,
-  MessageSquare,
-  CheckSquare,
-  Trophy,
-  FileText,
-  Settings,
-  LogOut,
-  Bell,
-  Home,
+  BarChart3, Users, Kanban, MessageSquare, CheckSquare,
+  Trophy, FileText, Settings, LogOut, Bell, Home,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 
 const navItems = [
   { icon: Home, label: "Dashboard", path: "/" },
   { icon: Users, label: "Clientes", path: "/clients" },
   { icon: Kanban, label: "Pipeline", path: "/pipeline" },
-  { icon: MessageSquare, label: "Atendimento", path: "/chat" },
+  { icon: MessageSquare, label: "WhatsApp", path: "/chat", badge: true },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
-  { icon: Trophy, label: "Gamificação", path: "/ranking" },
+  { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
   { icon: Bell, label: "Notificações", path: "/notifications" },
-];
-
-const bottomItems = [
-  { icon: Settings, label: "Configurações", path: "/settings" },
 ];
 
 export function AppSidebar() {
@@ -39,18 +25,19 @@ export function AppSidebar() {
   const { profile, signOut } = useAuth();
 
   return (
-    <div className="flex flex-col h-screen w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+    <div className="flex flex-col h-screen w-[220px] bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex-shrink-0">
       {/* Logo */}
-      <div className="p-6">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl gradient-primary flex items-center justify-center shadow-glow">
-            <BarChart3 className="h-5 w-5 text-white" />
+      <div className="px-5 py-6 border-b border-sidebar-border">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-[10px] gradient-primary flex items-center justify-center shadow-glow">
+            <BarChart3 className="h-[18px] w-[18px] text-white" />
           </div>
-          <span className="text-lg font-bold text-sidebar-primary-foreground">StoreCRM</span>
+          <div>
+            <div className="text-[15px] font-extrabold text-foreground">StoreCRM</div>
+            <div className="text-[11px] text-muted-foreground">Loja Premium</div>
+          </div>
         </div>
       </div>
-
-      <Separator className="bg-sidebar-border" />
 
       {/* Navigation */}
       <ScrollArea className="flex-1 px-3 py-4">
@@ -62,57 +49,57 @@ export function AppSidebar() {
                 key={item.path}
                 onClick={() => navigate(item.path)}
                 className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                  "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-150",
                   isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-glow"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    ? "bg-primary/20 text-primary border border-primary/40"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
                 )}
               >
-                <item.icon className="h-4.5 w-4.5" />
-                {item.label}
+                <item.icon className="h-4 w-4" />
+                <span className={cn(isActive && "font-bold")}>{item.label}</span>
+                {item.badge && (
+                  <span className="ml-auto bg-accent text-accent-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
+                    3
+                  </span>
+                )}
               </button>
             );
           })}
         </nav>
       </ScrollArea>
 
-      <Separator className="bg-sidebar-border" />
+      {/* Bottom - Settings & User */}
+      <div className="px-3 pb-4 space-y-1 border-t border-sidebar-border pt-3">
+        <button
+          onClick={() => navigate("/settings")}
+          className={cn(
+            "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all",
+            location.pathname === "/settings"
+              ? "bg-primary/20 text-primary border border-primary/40"
+              : "text-sidebar-foreground hover:bg-sidebar-accent border border-transparent"
+          )}
+        >
+          <Settings className="h-4 w-4" />
+          Config
+        </button>
 
-      {/* Bottom */}
-      <div className="p-3 space-y-1">
-        {bottomItems.map((item) => (
-          <button
-            key={item.path}
-            onClick={() => navigate(item.path)}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-              location.pathname === item.path
-                ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                : "text-sidebar-foreground hover:bg-sidebar-accent"
-            )}
-          >
-            <item.icon className="h-4.5 w-4.5" />
-            {item.label}
-          </button>
-        ))}
-
-        {/* User info */}
-        <div className="flex items-center gap-3 px-3 py-3 mt-2 rounded-lg bg-sidebar-accent">
-          <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-white">
-            {profile?.name?.charAt(0)?.toUpperCase() || "U"}
+        <div className="flex items-center gap-2.5 px-3 py-3 rounded-[10px] bg-sidebar-accent mt-2">
+          <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-[11px] font-bold text-white">
+            {profile?.name?.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "U"}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-sidebar-accent-foreground">
+            <p className="text-[13px] font-semibold text-foreground truncate">
               {profile?.name || "Usuário"}
             </p>
+            <p className="text-[11px] text-muted-foreground">Gerente</p>
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-sidebar-foreground hover:text-destructive"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
             onClick={signOut}
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>

@@ -1,230 +1,127 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import {
-  MessageSquare,
-  Send,
-  Phone,
-  Search,
-  Bot,
-  Paperclip,
-  Mic,
-  Image as ImageIcon,
-  FileText,
-  ArrowRightLeft,
-  User,
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Search, Bot, Send } from "lucide-react";
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  aberta: { label: "Aberta", color: "bg-primary/10 text-primary" },
-  em_atendimento: { label: "Em Atendimento", color: "bg-warning/10 text-warning" },
-  aguardando_cliente: { label: "Aguardando", color: "bg-muted text-muted-foreground" },
-  finalizada: { label: "Finalizada", color: "bg-success/10 text-success" },
+const STATUS_COLORS: Record<string, string> = {
+  aberta: "hsl(var(--chart-1))",
+  "em atendimento": "hsl(var(--chart-2))",
+  aguardando: "hsl(var(--chart-3))",
+  finalizada: "hsl(var(--muted-foreground))",
 };
 
-interface Conversation {
-  id: string;
-  clientName: string;
-  lastMessage: string;
-  status: string;
-  time: string;
-  unread: number;
-}
-
-interface Message {
-  id: string;
-  content: string;
-  sender: "client" | "agent" | "ai";
-  time: string;
-}
-
-// Demo data for layout - will be replaced with real WhatsApp integration via N8N
-const demoConversations: Conversation[] = [
-  { id: "1", clientName: "Maria Silva", lastMessage: "Olá, quero saber sobre o produto X", status: "em_atendimento", time: "14:32", unread: 2 },
-  { id: "2", clientName: "João Santos", lastMessage: "Obrigado pela informação!", status: "aguardando_cliente", time: "13:15", unread: 0 },
-  { id: "3", clientName: "Ana Costa", lastMessage: "Qual o preço?", status: "aberta", time: "12:00", unread: 1 },
-];
-
-const demoMessages: Message[] = [
-  { id: "1", content: "Olá, quero saber sobre o produto X", sender: "client", time: "14:30" },
-  { id: "2", content: "Olá Maria! Claro, o produto X está disponível. Posso te ajudar com mais detalhes?", sender: "agent", time: "14:31" },
-  { id: "3", content: "Sim, qual o preço e prazo de entrega?", sender: "client", time: "14:32" },
+const demoConversations = [
+  { id: "1", name: "João Silva", msg: "Oi, quero saber sobre o produto X", time: "2min", status: "aberta", unread: 3 },
+  { id: "2", name: "Maria Fernanda", msg: "Quando chega o pedido?", time: "15min", status: "em atendimento", unread: 1 },
+  { id: "3", name: "Roberto Alves", msg: "Qual o prazo de entrega?", time: "1h", status: "aguardando", unread: 0 },
+  { id: "4", name: "Carla Pinto", msg: "Obrigada pelo atendimento!", time: "2h", status: "finalizada", unread: 0 },
+  { id: "5", name: "Lucas Mendes", msg: "Tem parcelamento?", time: "3h", status: "aberta", unread: 2 },
 ];
 
 export default function Chat() {
-  const [selectedConversation, setSelectedConversation] = useState<string | null>("1");
-  const [messageInput, setMessageInput] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [active, setActive] = useState(0);
+  const [msg, setMsg] = useState("");
   const [aiMode, setAiMode] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const filteredConversations = demoConversations.filter((c) =>
-    c.clientName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = demoConversations.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const conv = demoConversations[active];
 
   return (
-    <div className="h-screen flex animate-fade-in">
-      {/* Conversation List */}
-      <div className="w-80 border-r border-border flex flex-col bg-card">
-        <div className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold">Atendimento</h2>
-            <Badge variant="secondary">{demoConversations.length}</Badge>
-          </div>
+    <div className="flex h-[calc(100vh-60px)] animate-fade-in">
+      {/* Sidebar conversas */}
+      <div className="w-[280px] border-r border-border flex flex-col bg-card">
+        <div className="p-4 border-b border-border">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-10"
-              placeholder="Buscar conversa..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+            <Input className="pl-10 bg-background border-border text-[13px]" placeholder="Buscar conversa..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
           </div>
         </div>
-        <Separator />
-        <ScrollArea className="flex-1">
-          <div className="p-2">
-            {filteredConversations.map((conv) => {
-              const statusConfig = STATUS_LABELS[conv.status] || STATUS_LABELS.aberta;
-              return (
-                <button
-                  key={conv.id}
-                  onClick={() => setSelectedConversation(conv.id)}
-                  className={`w-full text-left p-3 rounded-lg mb-1 transition-colors ${
-                    selectedConversation === conv.id
-                      ? "bg-primary/10 border border-primary/20"
-                      : "hover:bg-muted/50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-sm truncate">{conv.clientName}</span>
-                    <span className="text-[10px] text-muted-foreground">{conv.time}</span>
+        <div className="flex-1 overflow-y-auto">
+          {filtered.map((c, i) => {
+            const color = STATUS_COLORS[c.status] || STATUS_COLORS.finalizada;
+            return (
+              <div key={c.id} onClick={() => setActive(i)} className={`px-4 py-3.5 cursor-pointer flex items-center gap-2.5 border-b border-border/20 transition-colors ${active === i ? "bg-border/60" : "hover:bg-border/30"}`}>
+                <div className="relative">
+                  <div className="w-[38px] h-[38px] rounded-full gradient-primary flex items-center justify-center text-[11px] font-bold text-white">
+                    {c.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mb-1.5">{conv.lastMessage}</p>
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline" className={`text-[10px] ${statusConfig.color}`}>
-                      {statusConfig.label}
-                    </Badge>
-                    {conv.unread > 0 && (
-                      <span className="bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                        {conv.unread}
-                      </span>
-                    )}
+                  {c.unread > 0 && (
+                    <div className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center">{c.unread}</div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between">
+                    <span className="text-foreground font-semibold text-[13px]">{c.name}</span>
+                    <span className="text-muted-foreground text-[11px]">{c.time}</span>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </ScrollArea>
+                  <div className="text-muted-foreground text-[12px] truncate">{c.msg}</div>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: color + "22", color }}>{c.status}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Chat Area */}
+      {/* Chat */}
       <div className="flex-1 flex flex-col">
-        {selectedConversation ? (
-          <>
-            {/* Chat Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-card">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-white">
-                  M
-                </div>
-                <div>
-                  <h3 className="font-semibold text-sm">Maria Silva</h3>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Phone className="h-3 w-3" /> (11) 99999-9999
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={aiMode ? "default" : "outline"}
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setAiMode(!aiMode)}
-                >
-                  <Bot className="h-4 w-4" />
-                  {aiMode ? "IA Ativa" : "Ativar IA"}
-                </Button>
-                <Button variant="outline" size="sm" className="gap-1.5">
-                  <ArrowRightLeft className="h-4 w-4" /> Transferir
-                </Button>
-              </div>
-            </div>
-
-            {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="max-w-2xl mx-auto space-y-4">
-                {demoMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.sender === "client" ? "justify-start" : "justify-end"}`}
-                  >
-                    <div
-                      className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                        msg.sender === "client"
-                          ? "bg-muted text-foreground rounded-bl-md"
-                          : msg.sender === "ai"
-                          ? "bg-accent/20 text-foreground rounded-br-md border border-accent/30"
-                          : "bg-primary text-primary-foreground rounded-br-md"
-                      }`}
-                    >
-                      {msg.sender === "ai" && (
-                        <span className="text-[10px] font-medium text-accent flex items-center gap-1 mb-1">
-                          <Bot className="h-3 w-3" /> Resposta IA
-                        </span>
-                      )}
-                      <p className="text-sm">{msg.content}</p>
-                      <span className={`text-[10px] mt-1 block ${msg.sender === "client" ? "text-muted-foreground" : "opacity-70"}`}>
-                        {msg.time}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-
-            {/* Message Input */}
-            <div className="p-4 border-t border-border bg-card">
-              <div className="flex items-center gap-2 max-w-2xl mx-auto">
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="h-9 w-9">
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-9 w-9">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-9 w-9">
-                    <Mic className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                </div>
-                <Input
-                  className="flex-1"
-                  placeholder="Digite uma mensagem..."
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && setMessageInput("")}
-                />
-                <Button size="icon" className="h-9 w-9">
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
-            <div className="text-center">
-              <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-40" />
-              <p className="text-lg font-medium">Central de Atendimento</p>
-              <p className="text-sm">Selecione uma conversa para começar</p>
-              <p className="text-xs mt-4 max-w-sm">
-                A integração com WhatsApp será feita via N8N. Configure seus webhooks para receber e enviar mensagens automaticamente.
-              </p>
-            </div>
+        {/* Header */}
+        <div className="px-5 py-3.5 border-b border-border flex justify-between items-center bg-card">
+          <div>
+            <div className="text-foreground font-bold">{conv.name}</div>
+            <div className="text-muted-foreground text-[12px]">{conv.status}</div>
           </div>
-        )}
+          <div className="flex gap-2">
+            <Button variant={aiMode ? "default" : "outline"} size="sm" className="gap-1.5 text-[12px]" onClick={() => setAiMode(!aiMode)}>
+              <Bot className="h-4 w-4" /> {aiMode ? "IA Ativa" : "Ativar IA"}
+            </Button>
+            <Button variant="outline" size="sm" className="text-[12px]">Transferir</Button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-3">
+          {aiMode && (
+            <div className="bg-primary/10 border border-primary/30 rounded-[10px] px-3.5 py-2.5 text-primary text-[12px] text-center">
+              🤖 IA assumiu a conversa — respondendo automaticamente via N8N
+            </div>
+          )}
+          <div className="self-start bg-border rounded-xl rounded-bl-md px-3.5 py-2.5 max-w-[70%]">
+            <span className="text-foreground text-[13px]">{conv.msg}</span>
+            <div className="text-muted-foreground text-[10px] mt-1">{conv.time}</div>
+          </div>
+          <div className="self-end bg-primary rounded-xl rounded-br-md px-3.5 py-2.5 max-w-[70%]">
+            <span className="text-primary-foreground text-[13px]">Olá! Tudo bem? Posso te ajudar com isso. Qual produto você tem interesse?</span>
+            <div className="text-primary-foreground/60 text-[10px] mt-1">agora ✓✓</div>
+          </div>
+        </div>
+
+        {/* Input */}
+        <div className="px-4 py-3.5 border-t border-border flex gap-2.5 items-center bg-card">
+          <button className="bg-background border border-border rounded-lg p-2 text-muted-foreground hover:text-foreground transition-colors">📎</button>
+          <button className="bg-background border border-border rounded-lg p-2 text-muted-foreground hover:text-foreground transition-colors">🎤</button>
+          <Input className="flex-1 bg-background border-border text-[13px]" placeholder="Digite uma mensagem..." value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && setMsg("")} />
+          <Button size="sm" className="gap-1.5"><Send className="h-4 w-4" /></Button>
+        </div>
+      </div>
+
+      {/* Client info panel */}
+      <div className="w-[220px] border-l border-border p-4 overflow-y-auto bg-card">
+        <div className="text-center mb-4">
+          <div className="w-[52px] h-[52px] rounded-full gradient-primary mx-auto mb-2 flex items-center justify-center text-white font-bold">
+            {conv.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+          </div>
+          <div className="text-foreground font-bold text-sm">{conv.name}</div>
+        </div>
+        {[["Ticket Médio", "R$ 2.800"], ["Última Compra", "15 dias"], ["Total Compras", "3"], ["Origem", "WhatsApp"]].map(([k, v]) => (
+          <div key={k} className="mb-3">
+            <div className="text-muted-foreground text-[11px] uppercase tracking-wider mb-0.5">{k}</div>
+            <div className="text-foreground text-[13px] font-semibold">{v}</div>
+          </div>
+        ))}
+        <Button variant="outline" size="sm" className="w-full mt-2 text-[12px] border-primary/40 text-primary hover:bg-primary/10">+ Criar Tarefa</Button>
+        <Button variant="outline" size="sm" className="w-full mt-2 text-[12px] border-accent/40 text-accent hover:bg-accent/10">+ Criar Oportunidade</Button>
       </div>
     </div>
   );

@@ -1,0 +1,70 @@
+{
+  "name": "05 - Notificação Novo Lead",
+  "description": "Escuta novos registros na tabela clients via webhook do Supabase e notifica o vendedor responsável.",
+  "nodes": [
+    {
+      "name": "Webhook Supabase - Novo Cliente",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-lead",
+        "responseMode": "onReceived"
+      },
+      "notes": "Configure um Database Webhook no Supabase para disparar quando INSERT na tabela clients. URL: https://seu-n8n.com/webhook/new-lead"
+    },
+    {
+      "name": "Buscar Vendedor Responsável",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/profiles?tenant_id=eq.{{$json.record.tenant_id}}&select=user_id,name&limit=1",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
+        }
+      },
+      "notes": "Busca o primeiro vendedor do tenant. Em produção, implemente lógica de distribuição round-robin."
+    },
+    {
+      "name": "Criar Notificação no CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/notifications",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "🆕 Novo Lead Recebido",
+          "message": "{{$json.record.name}} ({{$json.record.origin}}) acabou de ser cadastrado.",
+          "tenant_id": "={{$json.record.tenant_id}}",
+          "user_id": "={{$node['Buscar Vendedor Responsável'].json[0].user_id}}"
+        }
+      }
+    },
+    {
+      "name": "Criar Oportunidade Automaticamente",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/opportunities",
+        "headers": {
+          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
+          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "Oportunidade - {{$json.record.name}}",
+          "client_id": "={{$json.record.id}}",
+          "tenant_id": "={{$json.record.tenant_id}}",
+          "responsible_id": "={{$node['Buscar Vendedor Responsável'].json[0].user_id}}",
+          "stage": "lead_recebido",
+          "estimated_value": 0
+        }
+      },
+      "notes": "Cria automaticamente uma oportunidade no pipeline quando um novo lead é cadastrado."
+    }
+  ]
+}

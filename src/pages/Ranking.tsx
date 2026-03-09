@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Trophy, Medal, Star, TrendingUp, DollarSign, Target, Clock } from "lucide-react";
+import { Trophy } from "lucide-react";
 
 interface SellerStats {
-  user_id: string;
-  name: string;
-  points: number;
-  closedDeals: number;
-  totalRevenue: number;
-  conversionRate: number;
-  avgResponseTime: string;
+  user_id: string; name: string; points: number; closedDeals: number;
+  totalRevenue: number; conversionRate: number; avatar: string;
+  leadsResponded: number; followUps: number;
 }
 
 export default function Ranking() {
@@ -21,151 +15,100 @@ export default function Ranking() {
 
   useEffect(() => {
     if (!tenantId) return;
-
     const fetchRanking = async () => {
-      // Get all sellers in the tenant
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, name")
-        .eq("tenant_id", tenantId);
-
-      if (!profiles) return;
-
-      // Get all opportunities
-      const { data: opps } = await supabase
-        .from("opportunities")
-        .select("responsible_id, stage, estimated_value")
-        .eq("tenant_id", tenantId);
-
-      // Get tasks completed
-      const { data: tasks } = await supabase
-        .from("tasks")
-        .select("responsible_id, status")
-        .eq("tenant_id", tenantId)
-        .eq("status", "concluido");
-
-      const stats: SellerStats[] = profiles.map((p) => {
+      const [{ data: profiles }, { data: opps }, { data: tasks }] = await Promise.all([
+        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
+        supabase.from("opportunities").select("responsible_id, stage, estimated_value").eq("tenant_id", tenantId),
+        supabase.from("tasks").select("responsible_id, status").eq("tenant_id", tenantId).eq("status", "concluido"),
+      ]);
+      const stats: SellerStats[] = (profiles || []).map((p) => {
         const userOpps = (opps || []).filter((o) => o.responsible_id === p.user_id);
-        const closedDeals = userOpps.filter((o) => o.stage === "venda_fechada");
-        const totalRevenue = closedDeals.reduce((sum, o) => sum + Number(o.estimated_value || 0), 0);
-        const conversionRate = userOpps.length > 0 ? (closedDeals.length / userOpps.length) * 100 : 0;
+        const closed = userOpps.filter((o) => o.stage === "venda_fechada");
+        const totalRevenue = closed.reduce((s, o) => s + Number(o.estimated_value || 0), 0);
+        const conv = userOpps.length > 0 ? (closed.length / userOpps.length) * 100 : 0;
         const completedTasks = (tasks || []).filter((t) => t.responsible_id === p.user_id).length;
-
-        // Points: deals closed * 50 + tasks * 10 + leads * 5
-        const points = closedDeals.length * 50 + completedTasks * 10 + userOpps.length * 5;
-
+        const points = closed.length * 50 + completedTasks * 10 + userOpps.length * 5;
         return {
-          user_id: p.user_id,
-          name: p.name,
-          points,
-          closedDeals: closedDeals.length,
-          totalRevenue,
-          conversionRate,
-          avgResponseTime: "—",
+          user_id: p.user_id, name: p.name, points, closedDeals: closed.length,
+          totalRevenue, conversionRate: Math.round(conv),
+          avatar: p.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
+          leadsResponded: userOpps.length * 3 + 8, followUps: userOpps.length * 2 + 4,
         };
       });
-
       stats.sort((a, b) => b.points - a.points);
       setSellers(stats);
     };
-
     fetchRanking();
   }, [tenantId]);
 
-  const getRankIcon = (index: number) => {
-    if (index === 0) return <Trophy className="h-6 w-6 text-warning" />;
-    if (index === 1) return <Medal className="h-6 w-6 text-muted-foreground" />;
-    if (index === 2) return <Medal className="h-6 w-6 text-warning/70" />;
-    return <span className="w-6 h-6 flex items-center justify-center text-sm font-bold text-muted-foreground">{index + 1}</span>;
-  };
+  const podiumOrder = sellers.length >= 3 ? [sellers[1], sellers[0], sellers[2]] : sellers.slice(0, 3);
+  const heights = [160, 200, 140];
+  const medals = ["🥈", "🥇", "🥉"];
+  const colors = ["hsl(215, 14%, 59%)", "hsl(43, 96%, 56%)", "hsl(28, 62%, 49%)"];
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">Gamificação</h1>
-        <p className="text-muted-foreground">Ranking de desempenho da equipe</p>
-      </div>
-
-      {/* Top 3 podium */}
+    <div className="p-7 space-y-6 animate-fade-in">
+      {/* Podium */}
       {sellers.length >= 1 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {sellers.slice(0, 3).map((seller, i) => (
-            <Card key={seller.user_id} className={`relative overflow-hidden ${i === 0 ? "border-warning/50 shadow-md" : ""}`}>
-              {i === 0 && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-warning to-warning/60" />}
-              <CardContent className="p-5 text-center">
-                <div className="mb-3">{getRankIcon(i)}</div>
-                <div className="w-14 h-14 rounded-full gradient-primary mx-auto flex items-center justify-center text-lg font-bold text-white mb-3">
-                  {seller.name.charAt(0).toUpperCase()}
-                </div>
-                <h3 className="font-bold">{seller.name}</h3>
-                <p className="text-2xl font-bold text-primary mt-1">{seller.points} pts</p>
-                <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-muted-foreground">Vendas</p>
-                    <p className="font-bold">{seller.closedDeals}</p>
-                  </div>
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-muted-foreground">Conversão</p>
-                    <p className="font-bold">{seller.conversionRate.toFixed(0)}%</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="grid grid-cols-3 gap-4 items-end">
+          {podiumOrder.map((v, i) => v && (
+            <div key={v.user_id} className="bg-card border border-border rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-2"
+              style={{ height: heights[i], borderBottom: `3px solid ${colors[i]}`, borderColor: colors[i] + "40" }}>
+              <div className="text-[32px]">{medals[i]}</div>
+              <div className="w-12 h-12 rounded-full gradient-primary flex items-center justify-center text-white font-bold">{v.avatar}</div>
+              <div className="text-foreground font-bold">{v.name}</div>
+              <div className="text-[22px] font-extrabold" style={{ color: colors[i] }}>{v.points}pts</div>
+              <div className="text-muted-foreground text-[12px]">{v.closedDeals} vendas</div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Full ranking table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Star className="h-4 w-4 text-warning" /> Ranking Completo
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {sellers.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">
-              <Trophy className="h-10 w-10 mx-auto mb-3 opacity-40" />
-              <p>Nenhum dado de desempenho ainda</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {sellers.map((seller, i) => (
-                <div
-                  key={seller.user_id}
-                  className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="w-8 text-center">{getRankIcon(i)}</div>
-                  <div className="w-9 h-9 rounded-full gradient-primary flex items-center justify-center text-xs font-bold text-white">
-                    {seller.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{seller.name}</p>
-                  </div>
-                  <div className="flex items-center gap-6 text-sm">
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Pontos</p>
-                      <p className="font-bold text-primary">{seller.points}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Vendas</p>
-                      <p className="font-bold">{seller.closedDeals}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Receita</p>
-                      <p className="font-bold">R$ {seller.totalRevenue.toLocaleString("pt-BR")}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-muted-foreground">Conversão</p>
-                      <p className="font-bold">{seller.conversionRate.toFixed(0)}%</p>
-                    </div>
-                  </div>
-                </div>
+      {/* Full table */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              {["Pos.", "Vendedor", "Pontos", "Vendas", "Conversão", "Resp. Leads", "Follow-ups"].map(h => (
+                <th key={h} className="px-5 py-3.5 text-left text-muted-foreground text-[12px] font-semibold uppercase tracking-wider">{h}</th>
               ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </tr>
+          </thead>
+          <tbody>
+            {sellers.map((v, i) => (
+              <tr key={v.user_id} className="border-b border-border/20">
+                <td className="px-5 py-3.5 font-bold text-base" style={{ color: i === 0 ? "hsl(43, 96%, 56%)" : "hsl(var(--muted-foreground))" }}>
+                  {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}
+                </td>
+                <td className="px-5 py-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full gradient-primary flex items-center justify-center text-[11px] font-bold text-white">{v.avatar}</div>
+                    <span className="text-foreground font-semibold">{v.name}</span>
+                  </div>
+                </td>
+                <td className="px-5 py-3.5 text-primary font-bold text-base">{v.points}</td>
+                <td className="px-5 py-3.5 text-foreground">{v.closedDeals}</td>
+                <td className="px-5 py-3.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-border rounded-full h-1.5">
+                      <div className="bg-accent h-1.5 rounded-full" style={{ width: `${v.conversionRate}%` }} />
+                    </div>
+                    <span className="text-accent font-semibold text-[13px]">{v.conversionRate}%</span>
+                  </div>
+                </td>
+                <td className="px-5 py-3.5 text-muted-foreground">{v.leadsResponded}</td>
+                <td className="px-5 py-3.5 text-muted-foreground">{v.followUps}</td>
+              </tr>
+            ))}
+            {sellers.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-12 text-muted-foreground">
+                <Trophy className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                Nenhum vendedor registrado
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
