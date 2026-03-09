@@ -73,7 +73,7 @@ export default function NpsPublic() {
     await supabase.from("nps_surveys").update({
       score: selectedScore,
       comment: trimmedComment || null,
-      category,
+      category: category as any,
       status: "responded" as any,
       responded_at: new Date().toISOString(),
     }).eq("id", survey.id);
