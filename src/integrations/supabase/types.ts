@@ -128,6 +128,102 @@ export type Database = {
           },
         ]
       }
+      conversations: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          id: string
+          last_message: string | null
+          last_message_at: string | null
+          responsible_id: string | null
+          status: Database["public"]["Enums"]["conversation_status"]
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          responsible_id?: string | null
+          status?: Database["public"]["Enums"]["conversation_status"]
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          responsible_id?: string | null
+          status?: Database["public"]["Enums"]["conversation_status"]
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          sender_id: string | null
+          sender_type: Database["public"]["Enums"]["message_sender_type"]
+          tenant_id: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          sender_id?: string | null
+          sender_type?: Database["public"]["Enums"]["message_sender_type"]
+          tenant_id: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          sender_id?: string | null
+          sender_type?: Database["public"]["Enums"]["message_sender_type"]
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           created_at: string
@@ -271,6 +367,7 @@ export type Database = {
           description: string | null
           due_date: string | null
           id: string
+          priority: Database["public"]["Enums"]["task_priority"]
           responsible_id: string | null
           status: Database["public"]["Enums"]["task_status"]
           tenant_id: string
@@ -283,6 +380,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           tenant_id: string
@@ -295,6 +393,7 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           tenant_id?: string
@@ -393,6 +492,11 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "gerente" | "vendedor" | "atendimento"
+      conversation_status:
+        | "aberta"
+        | "em_atendimento"
+        | "aguardando"
+        | "finalizada"
       lead_origin:
         | "whatsapp"
         | "instagram"
@@ -408,6 +512,7 @@ export type Database = {
         | "concorrencia"
         | "sem_resposta"
         | "outro"
+      message_sender_type: "cliente" | "atendente" | "ia"
       pipeline_stage:
         | "lead_recebido"
         | "contato_iniciado"
@@ -416,6 +521,7 @@ export type Database = {
         | "proposta_enviada"
         | "venda_fechada"
         | "perdido"
+      task_priority: "alta" | "media" | "baixa"
       task_status: "pendente" | "em_andamento" | "concluido"
     }
     CompositeTypes: {
@@ -545,6 +651,12 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "gerente", "vendedor", "atendimento"],
+      conversation_status: [
+        "aberta",
+        "em_atendimento",
+        "aguardando",
+        "finalizada",
+      ],
       lead_origin: [
         "whatsapp",
         "instagram",
@@ -562,6 +674,7 @@ export const Constants = {
         "sem_resposta",
         "outro",
       ],
+      message_sender_type: ["cliente", "atendente", "ia"],
       pipeline_stage: [
         "lead_recebido",
         "contato_iniciado",
@@ -571,6 +684,7 @@ export const Constants = {
         "venda_fechada",
         "perdido",
       ],
+      task_priority: ["alta", "media", "baixa"],
       task_status: ["pendente", "em_andamento", "concluido"],
     },
   },
