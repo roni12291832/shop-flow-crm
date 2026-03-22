@@ -131,10 +131,16 @@ async def receive_whatsapp_message(request: Request):
 
         if reply:
             # Busca instância do WhatsApp no banco
-            instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+            instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
             if instance_res.data:
-                token = instance_res.data[0]["api_token"]
-                await uazapi.send_text(token, phone, reply)
+                inst = instance_res.data[0]
+                await uazapi.send_text(
+                    api_url=inst["api_url"],
+                    api_token=inst["api_token"],
+                    instance_name=inst["instance_name"],
+                    phone=phone,
+                    message=reply
+                )
 
                 # Salva a resposta automática no banco
                 db.table("messages").insert({
@@ -176,11 +182,11 @@ async def notify_new_lead(request: Request):
     db = get_supabase()
 
     # Busca instância e token
-    instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+    instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
     if not instance_res.data:
         return {"status": "error", "message": "sem instância WhatsApp configurada"}
 
-    token = instance_res.data[0]["api_token"]
+    inst = instance_res.data[0]
 
     from config import get_settings
     s = get_settings()
@@ -198,5 +204,11 @@ async def notify_new_lead(request: Request):
         f"*Acesse o CRM para acompanhar!*"
     )
 
-    await uazapi.send_text(token, admin_phone, msg)
+    await uazapi.send_text(
+        api_url=inst["api_url"],
+        api_token=inst["api_token"],
+        instance_name=inst["instance_name"],
+        phone=admin_phone,
+        message=msg
+    )
     return {"status": "ok", "notified": True}

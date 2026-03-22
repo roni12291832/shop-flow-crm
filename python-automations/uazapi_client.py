@@ -16,28 +16,26 @@ class UazapiClient:
     """Cliente assíncrono para a UAZAPI."""
 
     def __init__(self):
-        s = get_settings()
-        self.base_url = s.uazapi_base_url.rstrip("/")
-        self.admin_token = s.uazapi_admin_token
-        self.headers = {
-            "Content-Type": "application/json",
-            "AdminToken": self.admin_token,
-        }
+        # Configuration is now dynamic per-instance from the DB
+        pass
 
-    async def send_text(self, instance_token: str, phone: str, message: str) -> dict:
+    async def send_text(self, api_url: str, api_token: str, instance_name: str, phone: str, message: str) -> dict:
         """
-        Envia mensagem de texto simples via UAZAPI.
+        Envia mensagem de texto simples via Evolution API.
         phone: número com DDI, ex: 5511999999999
         """
-        url = f"{self.base_url}/sendText"
+        url = f"{api_url.rstrip('/')}/message/sendText/{instance_name}"
+        headers = {
+            "Content-Type": "application/json",
+            "apikey": api_token,
+        }
         payload = {
-            "token": instance_token,
-            "phone": self._format_phone(phone),
-            "message": message,
+            "number": f"{self._format_phone(phone)}@s.whatsapp.net",
+            "text": message,
         }
         async with httpx.AsyncClient(timeout=30) as client:
             try:
-                resp = await client.post(url, json=payload, headers=self.headers)
+                resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
                 logger.info(f"Mensagem enviada para {phone}")
                 return resp.json()
@@ -50,7 +48,9 @@ class UazapiClient:
 
     async def send_bulk_campaign(
         self,
-        instance_token: str,
+        api_url: str,
+        api_token: str,
+        instance_name: str,
         contacts: list[dict],
         messages: list[str],
         min_delay: int = 15,
@@ -80,7 +80,7 @@ class UazapiClient:
             msg_template = random.choice(messages)
             personalized_msg = self._personalize_message(msg_template, contact)
 
-            resp = await self.send_text(instance_token, phone, personalized_msg)
+            resp = await self.send_text(api_url, api_token, instance_name, phone, personalized_msg)
             if "error" in resp:
                 results["failed"] += 1
                 results["errors"].append({"phone": phone, "error": resp["error"]})
@@ -95,27 +95,21 @@ class UazapiClient:
 
         return results
 
-    async def get_instance_status(self, instance_token: str) -> dict:
-        """Verifica status de conexão da instância."""
-        url = f"{self.base_url}/status"
-        payload = {"token": instance_token}
+    async def get_instance_status(self, api_url: str, api_token: str, instance_name: str) -> dict:
+        """Verifica status de conexão da instância na Evolution API."""
+        url = f"{api_url.rstrip('/')}/instance/connectionState/{instance_name}"
+        headers = {"apikey": api_token}
         async with httpx.AsyncClient(timeout=15) as client:
             try:
-                resp = await client.post(url, json=payload, headers=self.headers)
+                resp = await client.get(url, headers=headers)
                 return resp.json()
             except Exception as e:
                 return {"error": str(e)}
 
-    async def get_chats(self, instance_token: str, count: int = 50) -> list:
-        """Busca as últimas conversas da instância (para sync offline)."""
-        url = f"{self.base_url}/getChats"
-        payload = {"token": instance_token, "count": count}
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(url, json=payload, headers=self.headers)
-                return resp.json() if isinstance(resp.json(), list) else []
-            except Exception:
-                return []
+    async def get_chats(self, api_url: str, api_token: str, instance_name: str, count: int = 50) -> list:
+        """Busca as últimas conversas da instância."""
+        # TODO: Implement proper Evolution API chat sync mapping. Return empty list for now.
+        return []
 
     def _format_phone(self, phone: str) -> str:
         """Normaliza número de telefone."""

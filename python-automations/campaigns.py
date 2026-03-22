@@ -126,14 +126,14 @@ async def dispatch_campaign(campaign: CampaignRequest):
         )
 
     # ─── 2. Busca instância WhatsApp ──────────────────────────────────
-    instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+    instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
     if not instance_res.data:
         raise HTTPException(
             status_code=500,
             detail="Nenhuma instância WhatsApp configurada no CRM."
         )
 
-    token = instance_res.data[0]["api_token"]
+    inst = instance_res.data[0]
 
     # ─── 3. Dispara campanha via UAZAPI ───────────────────────────────
     logger.info(
@@ -142,7 +142,9 @@ async def dispatch_campaign(campaign: CampaignRequest):
     )
 
     results = await uazapi.send_bulk_campaign(
-        instance_token=token,
+        api_url=inst["api_url"],
+        api_token=inst["api_token"],
+        instance_name=inst["instance_name"],
         contacts=contacts_with_phone,
         messages=campaign.messages,
         min_delay=campaign.min_delay_seconds,

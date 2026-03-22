@@ -31,12 +31,12 @@ async def job_daily_report():
 
         # Busca instância WhatsApp
         db = get_supabase()
-        instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+        instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
         if not instance_res.data:
             logger.error("Nenhuma instância WhatsApp configurada para enviar relatório")
             return
 
-        token = instance_res.data[0]["api_token"]
+        inst = instance_res.data[0]
         s = get_settings()
 
         if not s.admin_phone:
@@ -44,7 +44,13 @@ async def job_daily_report():
             return
 
         # Envia relatório para o admin
-        await uazapi.send_text(token, s.admin_phone, report)
+        await uazapi.send_text(
+            api_url=inst["api_url"],
+            api_token=inst["api_token"],
+            instance_name=inst["instance_name"],
+            phone=s.admin_phone,
+            message=report
+        )
         logger.info(f"✅ Relatório diário enviado para {s.admin_phone}")
 
     except Exception as e:
@@ -65,15 +71,20 @@ async def job_sync_offline_messages():
         db = get_supabase()
 
         # Busca instância WhatsApp
-        instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+        instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
         if not instance_res.data:
             logger.warning("Sem instância WhatsApp para sync")
             return
 
-        token = instance_res.data[0]["api_token"]
+        inst = instance_res.data[0]
 
         # Busca últimos chats da UAZAPI
-        chats = await uazapi.get_chats(token, count=30)
+        chats = await uazapi.get_chats(
+            api_url=inst["api_url"],
+            api_token=inst["api_token"],
+            instance_name=inst["instance_name"],
+            count=30
+        )
 
         synced_count = 0
         for chat in chats:
@@ -141,12 +152,18 @@ async def job_notify_stale_leads():
         msg = "\n".join(lines)
 
         # Envia para admin
-        instance_res = db.table("whatsapp_instances").select("api_token").limit(1).execute()
+        instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
         if instance_res.data:
-            token = instance_res.data[0]["api_token"]
+            inst = instance_res.data[0]
             s_config = get_settings()
             if s_config.admin_phone:
-                await uazapi.send_text(token, s_config.admin_phone, msg)
+                await uazapi.send_text(
+                    api_url=inst["api_url"],
+                    api_token=inst["api_token"],
+                    instance_name=inst["instance_name"],
+                    phone=s_config.admin_phone,
+                    message=msg
+                )
                 logger.info(f"Alerta de leads parados enviado ({len(stale)} leads)")
 
     except Exception as e:
