@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Rotinas agendadas (Cron Jobs).
 Substitui os fluxos N8N 07 (relatório diário) e 09 (sync mensagens).

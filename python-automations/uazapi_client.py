@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Cliente para a API da UAZAPI (Evolution API / WhatsApp).
 Gerencia envio de mensagens de texto, mídia e status de instâncias.

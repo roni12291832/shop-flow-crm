@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Rotas de Campanha — Sistema inteligente de disparos em massa com anti-bloqueio.
 """

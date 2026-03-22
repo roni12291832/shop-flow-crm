@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Rotas de Webhook — recebem dados do WhatsApp (UAZAPI) e processam.
 Substitui completamente o fluxo N8N 08-whatsapp-lead-auto-pipeline.

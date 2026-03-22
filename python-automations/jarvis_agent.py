@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Jarvis — Agente de IA para análise de dados e respostas inteligentes.
 Usa OpenAI GPT-4o-mini como motor de inteligência.

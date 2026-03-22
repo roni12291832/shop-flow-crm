@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Configurações centrais do microserviço Python.
 Carrega variáveis de ambiente do .env automaticamente.

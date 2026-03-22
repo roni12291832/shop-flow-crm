@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Shop Flow CRM — Microserviço Python de Automações
 Substitui 100% do N8N com FastAPI + APScheduler.
