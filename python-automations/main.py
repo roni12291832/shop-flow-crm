@@ -126,14 +126,25 @@ async def root():
 async def jarvis_ask(request: dict):
     """
     Endpoint para o frontend perguntar algo ao Jarvis.
-    Body: {"question": "Como estão minhas vendas?"}
+    Body: {
+        "messages": [{"role": "user", "content": "..."}],
+        "crmContext": "...",
+        "userName": "..."
+    }
     """
-    question = request.get("question", "")
-    if not question:
-        return {"error": "Envie uma pergunta no campo 'question'"}
+    messages = request.get("messages", [])
+    crm_context = request.get("crmContext", "")
+    user_name = request.get("userName", "Usuário")
 
-    answer = await jarvis.analyze_query(question)
-    return {"answer": answer}
+    if not messages:
+        return {"error": "Envie mensagens no campo 'messages'"}
+
+    # O último item é a pergunta do usuário
+    user_question = messages[-1].get("content", "")
+    history = messages[:-1]
+
+    answer = await jarvis.analyze_query(user_question, history=history, external_context=crm_context, user_name=user_name)
+    return {"answer": answer, "response": answer} # Retorna nos dois formatos para compatibilidade
 
 
 @app.post("/jarvis/report")

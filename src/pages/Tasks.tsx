@@ -97,10 +97,19 @@ export default function Tasks() {
           <DialogContent>
             <DialogHeader><DialogTitle>Nova Tarefa</DialogTitle></DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
-              <div className="space-y-2"><Label>Título *</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required /></div>
-              <div className="space-y-2"><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Título *</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required placeholder="Ex: Organização do Salão" /></div>
+              <div className="space-y-2"><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Detalhes da tarefa..." /></div>
+              
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Data Limite</Label><Input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Responsável</Label>
+                  <Select value={form.responsible_id} onValueChange={(v) => setForm({ ...form, responsible_id: v })}>
+                    <SelectTrigger><SelectValue placeholder="Geral (Todos)" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Geral (Todos da Equipe)</SelectItem>
+                      {members.map(m => <SelectItem key={m.user_id} value={m.user_id}>{m.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-2"><Label>Prioridade</Label>
                   <Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -112,21 +121,21 @@ export default function Tasks() {
                   </Select>
                 </div>
               </div>
-              <div className="space-y-2"><Label>Cliente</Label>
-                <Select value={form.client_id} onValueChange={(v) => setForm({ ...form, client_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger>
-                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label>Data Limite</Label><Input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Vincular a Cliente (Opcional)</Label>
+                  <Select value={form.client_id} onValueChange={(v) => setForm({ ...form, client_id: v })}>
+                    <SelectTrigger><SelectValue placeholder="Nenhum / Tarefa Interna" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Nenhum (Tarefa Interna)</SelectItem>
+                      {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2"><Label>Responsável</Label>
-                <Select value={form.responsible_id} onValueChange={(v) => setForm({ ...form, responsible_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Geral (todos)" /></SelectTrigger>
-                  <SelectContent>
-                    {members.map(m => <SelectItem key={m.user_id} value={m.user_id}>{m.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" className="w-full">Criar Tarefa</Button>
+
+              <Button type="submit" className="w-full mt-4">Criar Tarefa</Button>
             </form>
           </DialogContent>
         </Dialog>

@@ -63,21 +63,30 @@ Formate para leitura no WhatsApp (linhas curtas, emojis, negrito com asterisco).
         )
         return response.choices[0].message.content
 
-    async def analyze_query(self, user_question: str) -> str:
+    async def analyze_query(self, user_question: str, history: list = None, external_context: str = "", user_name: str = "Usuário") -> str:
         """Responde perguntas do admin sobre o CRM com dados reais."""
-        context = await self._collect_full_context()
+        # Se recebeu contexto externo do frontend, usa ele. Se não, coleta do banco.
+        context = external_context if external_context else await self._collect_full_context()
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"""
+        ]
+        
+        # Adiciona histórico se existir
+        if history:
+            for msg in history[-5:]: # Pega os últimos 5
+                messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+
+        messages.append({"role": "user", "content": f"""
+Olá, sou o {user_name}. Tenho uma dúvida sobre o CRM.
+
 Contexto atual do CRM:
 {context}
 
-Pergunta do administrador: {user_question}
+Minha pergunta: {user_question}
 
-Responda de forma completa e acionável, usando os dados acima.
-"""},
-        ]
+Responda de forma completa e amigável, como se estivéssemos conversando. Use os dados acima para embasar sua resposta.
+"""})
 
         response = await self.client.chat.completions.create(
             model="gpt-4o-mini",
