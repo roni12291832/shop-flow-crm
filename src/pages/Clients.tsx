@@ -46,8 +46,15 @@ export default function Clients() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchClients = async () => {
-        const { data } = await supabase.from("clients").select("id, name, phone, email, city, origin, tags, ticket_medio, score, temperature, created_at").order("created_at", { ascending: false });
-    if (data) setClients(data as Client[]);
+    console.log("Fetching clients...");
+    const { data, error } = await supabase.from("clients").select("id, name, phone, email, city, origin, tags, ticket_medio, score, temperature, created_at").order("created_at", { ascending: false });
+    
+    if (error) {
+      console.error("Error fetching clients:", error);
+    } else {
+      console.log("Clients fetched successfully:", data?.length, "records found");
+      if (data) setClients(data as Client[]);
+    }
   };
 
   useEffect(() => { fetchClients(); }, []);
