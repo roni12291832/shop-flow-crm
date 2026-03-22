@@ -127,6 +127,28 @@ export default function WhatsAppConnect() {
         body: JSON.stringify({ instanceName, qrcode: true }),
       });
 
+      // --- AUTO-CONFIG WEBHOOK (Zero-Touch Setup) ---
+      // We set the webhook to point to the Render backend automatically
+      const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
+      try {
+        await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            enabled: true,
+            url: webhookUrl,
+            webhookByEvents: false,
+            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"]
+          }),
+        });
+        console.log("Webhook auto-configured to:", webhookUrl);
+      } catch (webhookErr) {
+        console.error("Failed to auto-configure webhook (not fatal):", webhookErr);
+      }
+
       // Then get QR code
       const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, {
         headers: { "Authorization": `Bearer ${apiToken}` },
