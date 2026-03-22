@@ -16,13 +16,12 @@ import { LossReasonDialog } from "@/components/crm/LossReasonDialog";
 import { Send } from "lucide-react";
 
 const STAGES = [
-  { value: "lead_recebido", label: "Lead Recebido", color: "hsl(var(--chart-1))" },
+  { value: "lead_novo", label: "Lead Novo", color: "hsl(var(--chart-1))" },
   { value: "contato_iniciado", label: "Contato Iniciado", color: "hsl(var(--chart-4))" },
-  { value: "cliente_interessado", label: "Interessado", color: "hsl(var(--chart-4))" },
-  { value: "negociacao", label: "Negociação", color: "hsl(var(--chart-3))" },
-  { value: "proposta_enviada", label: "Proposta Enviada", color: "hsl(var(--chart-7))" },
-  { value: "venda_fechada", label: "Venda Fechada", color: "hsl(var(--chart-2))" },
+  { value: "interessado", label: "Interessado", color: "hsl(var(--chart-3))" },
+  { value: "comprador", label: "Comprador", color: "hsl(var(--chart-2))" },
   { value: "perdido", label: "Perdido", color: "hsl(var(--destructive))" },
+  { value: "desqualificado", label: "Desqualificado", color: "hsl(var(--muted-foreground))" },
 ];
 
 interface Opportunity { id: string; title: string; estimated_value: number; stage: string; client_name?: string; client_phone?: string; origin?: string; }
@@ -33,7 +32,7 @@ export default function Pipeline() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", client_id: "", estimated_value: "", stage: "lead_recebido" });
+  const [form, setForm] = useState({ title: "", client_id: "", estimated_value: "", stage: "lead_novo" });
   const [lossDialogOpen, setLossDialogOpen] = useState(false);
   const [pendingLossId, setPendingLossId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -61,17 +60,17 @@ export default function Pipeline() {
     setClients((clientsRes.data || []) as Client[]);
   };
 
-  useEffect(() => { fetchData(); }, [tenantId]);
+  useEffect(() => { fetchData(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId || !user) return;
+    if (!user) return;
     const { error } = await supabase.from("opportunities").insert({
        title: form.title, client_id: form.client_id,
       estimated_value: parseFloat(form.estimated_value) || 0, stage: form.stage as any, responsible_id: user.id,
     });
     if (error) toast.error("Erro ao criar oportunidade");
-    else { toast.success("Oportunidade criada!"); setDialogOpen(false); setForm({ title: "", client_id: "", estimated_value: "", stage: "lead_recebido" }); fetchData(); }
+    else { toast.success("Oportunidade criada!"); setDialogOpen(false); setForm({ title: "", client_id: "", estimated_value: "", stage: "lead_novo" }); fetchData(); }
   };
 
   const moveStage = async (oppId: string, newStage: string) => {
@@ -122,7 +121,7 @@ export default function Pipeline() {
       return;
     }
 
-    const webhookUrl = localStorage.getItem(`whatsapp_n8n_send_webhook_${tenantId}`);
+    const webhookUrl = localStorage.getItem(`whatsapp_n8n_send_webhook`);
     if (!webhookUrl) {
       toast.error("URL do Webhook N8N não configurada! Ajuste em Conectar WhatsApp.");
       return;

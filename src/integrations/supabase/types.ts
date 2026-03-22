@@ -1205,13 +1205,12 @@ export type Database = {
         | "boleto"
         | "crediario"
       pipeline_stage:
-        | "lead_recebido"
+        | "lead_novo"
         | "contato_iniciado"
-        | "cliente_interessado"
-        | "negociacao"
-        | "proposta_enviada"
-        | "venda_fechada"
+        | "interessado"
+        | "comprador"
         | "perdido"
+        | "desqualificado"
       rule_channel: "whatsapp" | "sms" | "email"
       rule_trigger_event:
         | "after_purchase"

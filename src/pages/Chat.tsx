@@ -21,13 +21,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STAGES = [
-  { value: "lead_recebido", label: "Lead Recebido" },
+  { value: "lead_novo", label: "Lead Novo" },
   { value: "contato_iniciado", label: "Contato Iniciado" },
-  { value: "cliente_interessado", label: "Interessado" },
-  { value: "negociacao", label: "Negociação" },
-  { value: "proposta_enviada", label: "Proposta Enviada" },
-  { value: "venda_fechada", label: "Venda Fechada" },
+  { value: "interessado", label: "Interessado" },
+  { value: "comprador", label: "Comprador" },
   { value: "perdido", label: "Perdido" },
+  { value: "desqualificado", label: "Desqualificado" },
 ];
 
 interface Conversation {

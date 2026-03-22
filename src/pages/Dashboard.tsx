@@ -8,15 +8,14 @@ import { BirthdayDashboardWidget } from "@/components/datas/BirthdayDashboardWid
 import { NpsDashboardWidget } from "@/components/nps/NpsDashboardWidget";
 
 const STAGE_LABELS: Record<string, string> = {
-  lead_recebido: "Lead Recebido", contato_iniciado: "Contato Iniciado",
-  cliente_interessado: "Interessado", negociacao: "Negociação",
-  proposta_enviada: "Proposta Enviada", venda_fechada: "Venda Fechada", perdido: "Perdido",
+  lead_novo: "Lead Novo", contato_iniciado: "Contato Iniciado",
+  interessado: "Interessado", comprador: "Comprador",
+  perdido: "Perdido", desqualificado: "Desqualificado",
 };
 const STAGE_COLORS: Record<string, string> = {
-  lead_recebido: "hsl(var(--chart-1))", contato_iniciado: "hsl(var(--chart-4))",
-  cliente_interessado: "hsl(var(--chart-4))", negociacao: "hsl(var(--chart-3))",
-  proposta_enviada: "hsl(var(--chart-7))", venda_fechada: "hsl(var(--chart-2))",
-  perdido: "hsl(var(--destructive))",
+  lead_novo: "hsl(var(--chart-1))", contato_iniciado: "hsl(var(--chart-4))",
+  interessado: "hsl(var(--chart-3))", comprador: "hsl(var(--chart-2))",
+  perdido: "hsl(var(--destructive))", desqualificado: "hsl(var(--muted-foreground))",
 };
 const PRIORITY_COLORS: Record<string, string> = {
   alta: "hsl(var(--destructive))", media: "hsl(var(--chart-3))", baixa: "hsl(var(--chart-1))",
@@ -65,7 +64,7 @@ export default function Dashboard() {
       const pendingTasks = tasksRes.data || []; const profiles = profilesRes.data || [];
       const completedTasks = completedTasksRes.data || [];
 
-      const closedDeals = opps.filter((o) => o.stage === "venda_fechada");
+      const closedDeals = opps.filter((o) => o.stage === "comprador");
       const totalRevenue = closedDeals.reduce((sum, o) => sum + Number(o.estimated_value || 0), 0);
       const conversionRate = opps.length > 0 ? (closedDeals.length / opps.length) * 100 : 0;
 
@@ -81,7 +80,7 @@ export default function Dashboard() {
 
       const ranking = profiles.map((p) => {
         const userOpps = opps.filter((o) => o.responsible_id === p.user_id);
-        const userClosed = userOpps.filter((o) => o.stage === "venda_fechada");
+        const userClosed = userOpps.filter((o) => o.stage === "comprador");
         const userCompletedTasks = completedTasks.filter((t) => t.responsible_id === p.user_id).length;
         const points = userClosed.length * 50 + userCompletedTasks * 10 + userOpps.length * 5;
         const conversion = userOpps.length > 0 ? (userClosed.length / userOpps.length) * 100 : 0;
@@ -101,19 +100,19 @@ export default function Dashboard() {
       }));
 
       const alerts: { type: string; text: string }[] = [];
-      const noResponseLeads = opps.filter(o => o.stage === "lead_recebido").length;
+      const noResponseLeads = opps.filter(o => o.stage === "lead_novo").length;
       if (noResponseLeads > 0) alerts.push({ type: "warning", text: `${noResponseLeads} leads sem resposta` });
       if (pendingTasks.length > 0) alerts.push({ type: "info", text: `${pendingTasks.length} follow-ups pendentes para hoje` });
 
       setMetrics({ totalClients: clients.length, totalOpportunities: opps.length, totalRevenue, conversionRate, pendingTasks: pendingTasks.length, pipelineData, ranking, tasks, alerts });
     };
     fetchMetrics();
-  }, [tenantId, dateFilter]);
+  }, [dateFilter]);
 
   const statCards = [
     { label: "Leads no Mês", value: metrics.totalClients, sub: `${metrics.totalOpportunities} oportunidades`, color: "hsl(var(--chart-1))", icon: "◈" },
     { label: "Atendidos", value: metrics.totalOpportunities, sub: `${metrics.totalClients} clientes`, color: "hsl(var(--chart-4))", icon: "◎" },
-    { label: "Vendas", value: metrics.pipelineData.find(p => p.stage === "Venda Fechada")?.count || 0, sub: "este mês", color: "hsl(var(--chart-2))", icon: "◆" },
+    { label: "Vendas", value: metrics.pipelineData.find(p => p.stage === "Comprador")?.count || 0, sub: "este mês", color: "hsl(var(--chart-2))", icon: "◆" },
     { label: "Receita", value: `R$${metrics.totalRevenue.toLocaleString("pt-BR")}`, sub: "total fechado", color: "hsl(var(--chart-3))", icon: "⬟" },
     { label: "Conversão", value: `${metrics.conversionRate.toFixed(1)}%`, sub: "leads → vendas", color: "hsl(var(--chart-7))", icon: "⬡" },
   ];

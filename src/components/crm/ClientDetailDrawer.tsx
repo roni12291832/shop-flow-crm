@@ -82,8 +82,8 @@ export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: C
   };
 
   const STAGE_LABELS: Record<string, string> = {
-    lead_recebido: "Lead", contato_iniciado: "Contato", cliente_interessado: "Interessado",
-    negociacao: "Negociação", proposta_enviada: "Proposta", venda_fechada: "Fechada", perdido: "Perdido",
+    lead_novo: "Lead", contato_iniciado: "Contato", interessado: "Interessado",
+    comprador: "Comprador", perdido: "Perdido", desqualificado: "Desqualificado",
   };
 
   return (
