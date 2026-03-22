@@ -40,7 +40,7 @@ export default function WhatsAppConnect() {
       }
     };
     fetchConfig();
-  }, [tenantId]);
+  }, []);
 
   const saveConfig = async () => {
     if (!apiUrl || !apiToken || !instanceName) {
@@ -61,7 +61,6 @@ export default function WhatsAppConnect() {
       error = res.error;
     } else {
       const res = await supabase.from("whatsapp_instances").insert({
-        !,
         api_url: apiUrl,
         api_token: apiToken,
         instance_name: instanceName,
