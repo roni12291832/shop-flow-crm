@@ -11,8 +11,8 @@ import { toast } from "sonner";
 export default function WhatsAppConnect() {
   const {  hasRole } = useAuth();
   const isAdmin = hasRole("admin");
-  const [apiUrl, setApiUrl] = useState("");
-  const [apiToken, setApiToken] = useState("");
+  const [apiUrl, setApiUrl] = useState("https://nexaflow.uazapi.com");
+  const [apiToken, setApiToken] = useState("z6hUzjbsDoZKwYzUr3l8rRbDavfG6tgr55ifG4IdIl82w2cSfY");
   const [instanceName, setInstanceName] = useState("");
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
@@ -115,6 +115,12 @@ export default function WhatsAppConnect() {
       return;
     }
     setLoading(true);
+    
+    // Auto-save/update config if needed before generating QR
+    if (!dbRecordId || saved === false) {
+      await saveConfig();
+    }
+
     await updateStatusInDb("connecting");
     try {
       // Try to create instance first
@@ -228,26 +234,50 @@ export default function WhatsAppConnect() {
         </div>
       </div>
 
-      {/* API Config */}
+      {/* API Config - Hidden for regular UX, but kept for full transparency for Admins if needed */}
       {isAdmin && (
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
-          <h3 className="text-foreground font-bold text-base">Configuração UAZAPI / Evolution</h3>
-          <div className="space-y-2">
-            <Label>URL da API</Label>
-            <Input value={apiUrl} onChange={e => setApiUrl(e.target.value)} placeholder="https://sua-instancia.uazapi.com" />
+          <div className="flex items-center justify-between">
+            <h3 className="text-foreground font-bold text-base">Configuração do Sistema</h3>
+            <Badge variant="outline" className="text-[10px] opacity-70">Admin Only</Badge>
           </div>
-          <div className="space-y-2">
-            <Label>Token da API</Label>
-            <Input type="password" value={apiToken} onChange={e => setApiToken(e.target.value)} placeholder="Seu token de acesso" />
+          
+          <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 text-xs text-primary mb-2">
+            ℹ️ A conexão utiliza a API Central da UAZAPI. Você só precisa definir o Nome da Instância abaixo.
           </div>
-          <div className="space-y-2">
-            <Label>Nome da Instância</Label>
-            <Input value={instanceName} onChange={e => setInstanceName(e.target.value)} placeholder="minha-loja" />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Nome da Instância (Obrigatório)</Label>
+              <Input 
+                value={instanceName} 
+                onChange={e => {
+                  setInstanceName(e.target.value);
+                  setSaved(false);
+                }} 
+                placeholder="Ex: minha-loja-ag" 
+                className="bg-background border-primary/30"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={saveConfig} className="gap-1.5 w-full"><Save className="h-4 w-4" /> Registrar Instância</Button>
+            </div>
           </div>
-          <div className="flex gap-3 pt-2">
-            <Button onClick={saveConfig} className="gap-1.5"><Save className="h-4 w-4" /> Salvar Config</Button>
-            {saved && <Button variant="outline" onClick={checkStatus} disabled={loading} className="gap-1.5"><RefreshCw className="h-4 w-4" /> Verificar Status</Button>}
-          </div>
+
+          {/* Hidden fields for convenience but accessible if needed to change */}
+          <details className="mt-4">
+            <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-primary">Configurações Avançadas de API</summary>
+            <div className="pt-4 space-y-4">
+              <div className="space-y-2">
+                <Label>URL da API</Label>
+                <Input value={apiUrl} onChange={e => setApiUrl(e.target.value)} placeholder="https://sua-instancia.uazapi.com" />
+              </div>
+              <div className="space-y-2">
+                <Label>Token da API</Label>
+                <Input type="password" value={apiToken} onChange={e => setApiToken(e.target.value)} placeholder="Seu token de acesso" />
+              </div>
+            </div>
+          </details>
         </div>
       )}
 

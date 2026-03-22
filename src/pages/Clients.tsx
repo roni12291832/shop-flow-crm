@@ -54,12 +54,27 @@ export default function Clients() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-        const { error } = await supabase.from("clients").insert({
-       name: form.name, phone: form.phone || null,
-      email: form.email || null, city: form.city || null, origin: form.origin as any, notes: form.notes || null,
-    });
-    if (error) toast.error("Erro ao criar cliente");
-    else { toast.success("Cliente criado!"); setDialogOpen(false); setForm({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" }); fetchClients(); }
+    console.log("Creating client with form data:", form);
+    
+    const { data, error } = await supabase.from("clients").insert({
+      name: form.name, 
+      phone: form.phone || null,
+      email: form.email || null, 
+      city: form.city || null, 
+      origin: form.origin as any, 
+      notes: form.notes || null,
+    }).select();
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      toast.error(`Erro ao criar cliente: ${error.message}`);
+    } else {
+      console.log("Client created successfully:", data);
+      toast.success("Cliente criado!"); 
+      setDialogOpen(false); 
+      setForm({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" }); 
+      fetchClients(); 
+    }
   };
 
   const openDetail = (id: string) => { setSelectedClientId(id); setDrawerOpen(true); };
