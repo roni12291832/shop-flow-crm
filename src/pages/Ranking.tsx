@@ -37,7 +37,7 @@ export default function Ranking() {
       setSellers(stats);
     };
     fetchRanking();
-  }, [tenantId]);
+  }, []);
 
   const podiumOrder = sellers.length >= 3 ? [sellers[1], sellers[0], sellers[2]] : sellers.slice(0, 3);
   const heights = [160, 200, 140];

@@ -21,7 +21,7 @@ export function SellerHistory() {
   const [filter, setFilter] = useState<"all" | "today" | "week">("all");
 
   useEffect(() => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     const fetch = async () => {
       const now = new Date();
       const startOfWeek = new Date(now);
@@ -52,7 +52,7 @@ export function SellerHistory() {
       }
     };
     fetch();
-  }, [tenantId, user, filter]);
+  }, [user, filter]);
 
   const totalConfirmed = sales.filter(s => s.status === "confirmado").reduce((sum, s) => sum + Number(s.value), 0);
 

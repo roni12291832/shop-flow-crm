@@ -50,7 +50,7 @@ export default function Clients() {
     if (data) setClients(data as Client[]);
   };
 
-  useEffect(() => { fetchClients(); }, [tenantId]);
+  useEffect(() => { fetchClients(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,7 +107,7 @@ export default function Clients() {
   };
 
   const handleImport = async () => {
-    if (!tenantId || importData.length === 0) return;
+    if (importData.length === 0) return;
     setImporting(true);
 
     const validOrigins = ORIGINS.map(o => o.value);

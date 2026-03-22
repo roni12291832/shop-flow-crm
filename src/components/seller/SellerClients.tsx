@@ -30,7 +30,7 @@ export function SellerClients() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     const fetchClients = async () => {
       setLoading(true);
       // Get clients assigned to this seller, or all if no responsible filter
@@ -43,7 +43,7 @@ export function SellerClients() {
       setLoading(false);
     };
     fetchClients();
-  }, [tenantId, user]);
+  }, [user]);
 
   const filtered = clients.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||

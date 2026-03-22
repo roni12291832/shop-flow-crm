@@ -35,7 +35,7 @@ export function NpsDashboardWidget() {
       setRecentDetractors(detRes.count || 0);
     };
     fetch();
-  }, [tenantId]);
+  }, []);
 
   const getColor = () => {
     if (nps === null) return "text-muted-foreground";

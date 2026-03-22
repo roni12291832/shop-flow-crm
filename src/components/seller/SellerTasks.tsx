@@ -32,7 +32,7 @@ export function SellerTasks() {
   const [filter, setFilter] = useState("pendente");
 
   const fetchTasks = async () => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     // Fetch tasks assigned to this seller OR general (no responsible)
     const { data } = await supabase
       .from("tasks")
@@ -43,7 +43,7 @@ export function SellerTasks() {
     setTasks((data || []) as Task[]);
   };
 
-  useEffect(() => { fetchTasks(); }, [tenantId, user]);
+  useEffect(() => { fetchTasks(); }, [user]);
 
   const updateStatus = async (id: string, newStatus: string) => {
     await supabase.from("tasks").update({ status: newStatus as any }).eq("id", id);

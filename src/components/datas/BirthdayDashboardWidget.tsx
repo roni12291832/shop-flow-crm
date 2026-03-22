@@ -51,7 +51,7 @@ export function BirthdayDashboardWidget() {
       setWeekCount(weekTotal);
     };
     fetchBirthdays();
-  }, [tenantId]);
+  }, []);
 
   const openWhatsApp = (phone: string) => {
     const cleaned = phone.replace(/\D/g, "");

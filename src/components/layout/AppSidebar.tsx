@@ -48,7 +48,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const userRole = roles.length > 0 ? ROLE_LABELS[roles[0]] || roles[0] : "Usuário";
 
   useEffect(() => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     const fetchCounts = async () => {
       const [{ count: convCount }, { count: nCount }] = await Promise.all([
         supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "aberta"),
@@ -60,7 +60,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     fetchCounts();
 
     // Fetch tenant info (logo, name)
-    supabase.from("tenants").select("company_name, logo_url").eq("id", tenantId).single().then(({ data }) => {
+    supabase.from("tenants").select("company_name, logo_url").single().then(({ data }) => {
       if (data) setTenantInfo(data);
     });
 
@@ -71,7 +71,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [tenantId, user]);
+  }, [user]);
 
   const handleNav = (path: string) => {
     navigate(path);

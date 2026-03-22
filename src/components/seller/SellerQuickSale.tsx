@@ -61,12 +61,12 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   const [ncForm, setNcForm] = useState({ name: "", phone: "", origin: "loja_fisica" });
 
   useEffect(() => {
-        supabase.from("clients").select("id, name").order("name")
+    supabase.from("clients").select("id, name").order("name")
       .then(({ data }) => setClients(data || []));
     supabase.from("products").select("id, name, sell_price, current_stock, unit")
       .eq("active", true).order("name")
       .then(({ data }) => setProducts((data as any[]) || []));
-  }, [tenantId]);
+  }, []);
 
   const filtered = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 6);
   const filteredProducts = products.filter(p =>
@@ -110,7 +110,7 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   };
 
   const handleSubmit = async () => {
-    if (!selectedClient || totalValue <= 0 || !tenantId || !user) return;
+    if (!selectedClient || totalValue <= 0 || !user) return;
     setSaving(true);
 
     // Create sale entry
@@ -154,7 +154,7 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
 
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ncForm.name || !tenantId) return;
+    if (!ncForm.name) return;
     const { data, error } = await supabase.from("clients").insert({
             name: ncForm.name,
       phone: ncForm.phone || null,

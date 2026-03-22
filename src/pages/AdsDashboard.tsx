@@ -111,7 +111,7 @@ export default function AdsDashboard() {
       setLoading(false);
     };
     fetchData();
-  }, [tenantId, dateRange]);
+  }, [dateRange]);
 
   // Filter by platform
   const filteredMetrics = platform === "all" ? metrics : metrics.filter(m => m.platform === platform);

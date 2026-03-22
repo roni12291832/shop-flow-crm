@@ -141,7 +141,7 @@ export default function Goals() {
       };
     });
     setMonthlyHistory(history);
-  }, [tenantId, selectedMonth]);
+  }, [selectedMonth]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -151,7 +151,7 @@ export default function Goals() {
       .on("postgres_changes", { event: "*", schema: "public", table: "sales_entries" }, () => fetchData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [tenantId, fetchData]);
+  }, [fetchData]);
 
   const pctMonth = monthGoal > 0 ? Math.round((monthSales / monthGoal) * 100) : 0;
 

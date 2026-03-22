@@ -29,14 +29,13 @@ export default function NpsDashboard() {
   const [evolution, setEvolution] = useState<{ month: string; nps: number }[]>([]);
 
   useEffect(() => {
-        const fetchData = async () => {
+    const fetchData = async () => {
       const days = PERIOD_FILTERS.find(p => p.key === period)?.days || 30;
       const from = new Date(Date.now() - days * 86400000).toISOString();
 
       const { data: surveyData } = await supabase
         .from("nps_surveys")
         .select("*")
-        
         .eq("status", "responded")
         .gte("responded_at", from)
         .order("responded_at", { ascending: false });
@@ -60,7 +59,6 @@ export default function NpsDashboard() {
       const { data: evoData } = await supabase
         .from("nps_surveys")
         .select("responded_at, category")
-        
         .eq("status", "responded")
         .gte("responded_at", sixMonths)
         .order("responded_at", { ascending: true });
@@ -82,7 +80,7 @@ export default function NpsDashboard() {
       }
     };
     fetchData();
-  }, [tenantId, period]);
+  }, [period]);
 
   const total = surveys.length;
   const promotors = surveys.filter(s => s.category === "promotor").length;

@@ -50,11 +50,11 @@ export default function Tasks() {
     if (m.data) setMembers(m.data as ProfileItem[]);
   };
 
-  useEffect(() => { fetchData(); }, [tenantId]);
+  useEffect(() => { fetchData(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId || !user) return;
+    if (!user) return;
     const { error } = await supabase.from("tasks").insert({
        title: form.title, description: form.description || null,
       due_date: form.due_date || null, client_id: form.client_id || null,

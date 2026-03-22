@@ -43,7 +43,7 @@ export default function GoalsConfig() {
       setExistingGoals((goals || []) as Goal[]);
     };
     fetch_();
-  }, [tenantId]);
+  }, []);
 
   const distributeEqually = () => {
     const total = parseFloat(storeGoal) || 0;
@@ -55,7 +55,7 @@ export default function GoalsConfig() {
   };
 
   const handleSave = async () => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     setSaving(true);
 
     const goalsToInsert: any[] = [];

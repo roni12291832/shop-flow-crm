@@ -21,7 +21,7 @@ export function SellerRanking() {
   const [period, setPeriod] = useState<"month" | "all">("month");
 
   useEffect(() => {
-    if (!tenantId || !user) return;
+    if (!user) return;
 
     const fetchRanking = async () => {
       const now = new Date();
@@ -87,7 +87,7 @@ export function SellerRanking() {
     };
 
     fetchRanking();
-  }, [tenantId, user, period]);
+  }, [user, period]);
 
   const medals = ["🥇", "🥈", "🥉"];
   const podium = ranking.slice(0, 3);

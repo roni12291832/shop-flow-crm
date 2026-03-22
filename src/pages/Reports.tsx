@@ -45,7 +45,7 @@ export default function Reports() {
       setProfiles(profilesRes.data || []);
     };
     fetch();
-  }, [tenantId, dateRange]);
+  }, [dateRange]);
 
   const confirmed = sales.filter((s: any) => s.status === "confirmado");
   const totalRevenue = confirmed.reduce((s: number, e: any) => s + Number(e.value || 0), 0);

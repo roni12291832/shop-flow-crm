@@ -43,13 +43,13 @@ export function QuickSaleModal({ open, onOpenChange, onSaleCreated }: QuickSaleM
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    if (!tenantId || !open) return;
+    if (!open) return;
     const fetchClients = async () => {
       const { data } = await supabase.from("clients").select("id, name").order("name");
       setClients((data || []) as Client[]);
     };
     fetchClients();
-  }, [tenantId, open]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -69,7 +69,7 @@ export function QuickSaleModal({ open, onOpenChange, onSaleCreated }: QuickSaleM
   const filteredClients = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 5);
 
   const handleSubmit = async () => {
-    if (!selectedClient || !value || !tenantId || !user) return;
+    if (!selectedClient || !value || !user) return;
     setSaving(true);
     const { error } = await supabase.from("sales_entries").insert({
             user_id: user.id,

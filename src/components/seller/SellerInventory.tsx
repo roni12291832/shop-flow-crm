@@ -36,7 +36,7 @@ export function SellerInventory() {
       setLoading(false);
     };
     fetch();
-  }, [tenantId]);
+  }, []);
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||

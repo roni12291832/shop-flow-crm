@@ -43,7 +43,7 @@ export default function SpecialDates() {
     setSpecialDates(datesRes.data || []);
   };
 
-  useEffect(() => { fetchAll(); }, [tenantId]);
+  useEffect(() => { fetchAll(); }, []);
 
   const today = new Date();
   const currentMonth = today.getMonth();

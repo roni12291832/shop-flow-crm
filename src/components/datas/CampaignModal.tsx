@@ -44,7 +44,7 @@ export function CampaignModal({ open, onClose, onSaved, editingCampaign }: Campa
   }, [editingCampaign, open]);
 
   useEffect(() => {
-    if (!tenantId || !open) return;
+    if (!open) return;
     const fetchEstimate = async () => {
       let query = supabase.from("clients").select("id", { count: "exact" });
       if (selectedTags.length > 0) {
@@ -54,7 +54,7 @@ export function CampaignModal({ open, onClose, onSaved, editingCampaign }: Campa
       setEstimatedClients(count || 0);
     };
     fetchEstimate();
-  }, [selectedTags, tenantId, open]);
+  }, [selectedTags, open]);
 
   const toggleTag = (tag: string) => {
     setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
@@ -65,7 +65,7 @@ export function CampaignModal({ open, onClose, onSaved, editingCampaign }: Campa
   };
 
   const handleSave = async () => {
-    if (!name || !date || !tenantId) return;
+    if (!name || !date) return;
     setSaving(true);
     try {
       const payload = {

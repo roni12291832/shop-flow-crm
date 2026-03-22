@@ -44,7 +44,7 @@ export default function NpsConfig() {
       }
     };
     fetch();
-  }, [tenantId]);
+  }, []);
 
   const handleSave = async () => {
         setSaving(true);

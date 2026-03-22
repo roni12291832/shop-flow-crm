@@ -81,7 +81,7 @@ export default function Inventory() {
     setProducts((data as Product[]) || []);
   };
 
-  useEffect(() => { fetchProducts(); }, [tenantId]);
+  useEffect(() => { fetchProducts(); }, []);
 
   const filtered = products.filter(p => {
     if (search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
@@ -116,7 +116,7 @@ export default function Inventory() {
   };
 
   const handleSaveProduct = async () => {
-    if (!tenantId || !form.name) return;
+    if (!form.name) return;
     setSaving(true);
     const payload: any = {
             name: form.name,
@@ -163,7 +163,7 @@ export default function Inventory() {
   };
 
   const handleMovement = async () => {
-    if (!movementProduct || !mvForm.quantity || !tenantId || !user) return;
+    if (!movementProduct || !mvForm.quantity || !user) return;
     setSaving(true);
     const qty = parseInt(mvForm.quantity) || 0;
     if (qty <= 0 && mvForm.type !== "ajuste") { toast.error("Quantidade inválida"); setSaving(false); return; }

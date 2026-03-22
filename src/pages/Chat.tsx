@@ -118,7 +118,7 @@ export default function Chat() {
     
     // Also fetch the client's latest opportunity if they exist
     const conv = conversations.find(c => c.id === convId);
-    if (conv?.client_id && tenantId) {
+    if (conv?.client_id) {
       const { data: opps } = await supabase
         .from("opportunities")
         .select("id, stage")
@@ -133,7 +133,7 @@ export default function Chat() {
     }
   };
 
-  useEffect(() => { fetchConversations(); }, [tenantId]);
+  useEffect(() => { fetchConversations(); }, []);
   useEffect(() => { if (activeConvId) fetchMessages(activeConvId); }, [activeConvId, conversations.length]);
 
   // Realtime subscriptions
@@ -152,14 +152,14 @@ export default function Chat() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [tenantId, activeConvId]);
+  }, [activeConvId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const sendMessage = async () => {
-    if (!msg.trim() || !activeConvId || !tenantId || !user) return;
+    if (!msg.trim() || !activeConvId || !user) return;
     const content = msg.trim();
     setMsg("");
 
@@ -217,7 +217,7 @@ export default function Chat() {
   };
 
   const createConversation = async () => {
-    if (!tenantId || !user || !newConvClientId) return;
+    if (!user || !newConvClientId) return;
     const { error } = await supabase.from("conversations").insert({
             client_id: newConvClientId,
       responsible_id: user.id,
@@ -233,7 +233,7 @@ export default function Chat() {
   };
 
   const handleStageChange = async (newStage: string) => {
-    if (!activeClient || !tenantId || !user) return;
+    if (!activeClient || !user) return;
     
     if (clientOpp) {
       // Update existing

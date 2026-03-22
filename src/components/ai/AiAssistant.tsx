@@ -48,7 +48,6 @@ export function AiAssistant() {
   }, [open]);
 
   const gatherCrmContext = async () => {
-    if (!tenantId) return "";
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -121,7 +120,7 @@ ${clients.slice(0, 5).map(c => `- ${c.name} (${c.origin || "sem origem"})${c.las
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || loading || !tenantId) return;
+    if (!input.trim() || loading) return;
     const userMsg: Message = { role: "user", content: input.trim(), timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInput("");
@@ -142,7 +141,6 @@ ${clients.slice(0, 5).map(c => `- ${c.name} (${c.origin || "sem origem"})${c.las
         body: {
           messages: conversationMessages,
           crmContext,
-          tenantId,
           userName: profile?.name || "Usuário",
         },
       });

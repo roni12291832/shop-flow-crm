@@ -18,7 +18,7 @@ export function SellerHome() {
   const [myPosition, setMyPosition] = useState(0);
 
   useEffect(() => {
-    if (!tenantId || !user) return;
+    if (!user) return;
     const now = new Date();
     const todayStr = now.toISOString().split("T")[0];
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -88,7 +88,7 @@ export function SellerHome() {
       .on("postgres_changes", { event: "*", schema: "public", table: "sales_entries" }, () => fetchData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [tenantId, user]);
+  }, [user]);
 
   const greeting = () => {
     const h = new Date().getHours();
