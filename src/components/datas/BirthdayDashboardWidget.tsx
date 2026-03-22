@@ -13,17 +13,15 @@ interface BirthdayClient {
 }
 
 export function BirthdayDashboardWidget() {
-  const { tenantId } = useAuth();
-  const [todayBirthdays, setTodayBirthdays] = useState<BirthdayClient[]>([]);
+    const [todayBirthdays, setTodayBirthdays] = useState<BirthdayClient[]>([]);
   const [weekCount, setWeekCount] = useState(0);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetchBirthdays = async () => {
+        const fetchBirthdays = async () => {
       const { data: clients } = await supabase
         .from("clients")
         .select("id, name, phone, birth_date")
-        .eq("tenant_id", tenantId)
+        
         .not("birth_date", "is", null);
 
       if (!clients) return;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, applyThemeColors } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,7 @@ interface TeamMember { user_id: string; name: string; email: string; role: strin
 const ROLE_LABELS: Record<string, string> = { admin: "Administrador", gerente: "Gerente", vendedor: "Vendedor", atendimento: "Atendimento" };
 
 export default function Settings() {
-  const { tenantId, profile, user, hasRole } = useAuth();
+  const {  profile, user, hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const [tenant, setTenant] = useState({ company_name: "", logo_url: "", primary_color: "#6366f1", secondary_color: "#8b5cf6" });
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
@@ -32,13 +32,12 @@ export default function Settings() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetch_ = async () => {
+        const fetch_ = async () => {
       const { data: t } = await supabase.from("tenants").select("company_name, logo_url, primary_color, secondary_color").eq("id", tenantId).single();
       if (t) setTenant({ company_name: t.company_name || "", logo_url: t.logo_url || "", primary_color: t.primary_color || "#6366f1", secondary_color: t.secondary_color || "#8b5cf6" });
       const [{ data: profiles }, { data: roles }] = await Promise.all([
-        supabase.from("profiles").select("user_id, name, email").eq("tenant_id", tenantId),
-        supabase.from("user_roles").select("user_id, role").eq("tenant_id", tenantId),
+        supabase.from("profiles").select("user_id, name, email"),
+        supabase.from("user_roles").select("user_id, role"),
       ]);
       if (profiles && roles) {
         const roleMap: Record<string, string> = {};
@@ -79,8 +78,7 @@ export default function Settings() {
   };
 
   const removeLogo = async () => {
-    if (!tenantId) return;
-    setSaving(true);
+        setSaving(true);
     await supabase.from("tenants").update({ logo_url: null }).eq("id", tenantId);
     setTenant(prev => ({ ...prev, logo_url: "" }));
     setSaving(false);
@@ -92,7 +90,12 @@ export default function Settings() {
     setSaving(true);
     const { error } = await supabase.from("tenants").update({ company_name: tenant.company_name, logo_url: tenant.logo_url || null, primary_color: tenant.primary_color, secondary_color: tenant.secondary_color }).eq("id", tenantId);
     setSaving(false);
-    if (error) toast.error("Erro ao salvar"); else toast.success("Configurações salvas!");
+    if (error) {
+      toast.error("Erro ao salvar");
+    } else {
+      toast.success("Configurações salvas!");
+      applyThemeColors(tenant.primary_color, tenant.secondary_color);
+    }
   };
 
   const saveProfile = async () => {
@@ -104,12 +107,11 @@ export default function Settings() {
   };
 
   const inviteMember = async () => {
-    if (!tenantId) return;
-    setInviting(true);
+        setInviting(true);
     const { error } = await supabase.auth.signUp({
       email: inviteForm.email,
       password: inviteForm.password,
-      options: { data: { name: inviteForm.name, tenant_id: tenantId } },
+      options: { data: { name: inviteForm.name, } },
     });
     setInviting(false);
     if (error) toast.error(error.message);
@@ -119,8 +121,8 @@ export default function Settings() {
       setInviteForm({ email: "", password: "", name: "", role: "vendedor" });
       // Refresh team
       const [{ data: profiles }, { data: roles }] = await Promise.all([
-        supabase.from("profiles").select("user_id, name, email").eq("tenant_id", tenantId),
-        supabase.from("user_roles").select("user_id, role").eq("tenant_id", tenantId),
+        supabase.from("profiles").select("user_id, name, email"),
+        supabase.from("user_roles").select("user_id, role"),
       ]);
       if (profiles && roles) {
         const roleMap: Record<string, string> = {};
@@ -131,8 +133,7 @@ export default function Settings() {
   };
 
   const changeRole = async (userId: string, newRole: string) => {
-    if (!tenantId) return;
-    const { error } = await supabase.from("user_roles").update({ role: newRole as any }).eq("user_id", userId).eq("tenant_id", tenantId);
+        const { error } = await supabase.from("user_roles").update({ role: newRole as any }).eq("user_id", userId);
     if (error) toast.error("Erro ao alterar role");
     else {
       toast.success("Role atualizado!");

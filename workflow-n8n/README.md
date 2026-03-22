@@ -6,13 +6,16 @@ Esta pasta contém os modelos de fluxos para integração do CRM com N8N.
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `01-whatsapp-webhook-receiver.json` | Recebe mensagens do WhatsApp via webhook e salva no banco |
-| `02-whatsapp-send-message.json` | Envia mensagens do CRM para o WhatsApp do cliente |
-| `03-ai-auto-reply.json` | Resposta automática com IA quando modo IA está ativo |
-| `04-followup-automatico.json` | Verifica leads parados e dispara follow-up automático |
-| `05-notificacao-novo-lead.json` | Notifica vendedores quando novo lead é recebido |
-| `06-tarefa-automatica.json` | Cria tarefas automaticamente baseado em eventos |
-| `07-relatorio-diario.json` | Envia relatório diário de métricas por email/WhatsApp |
+| `02-whatsapp-send-message.json` | Envia mensagens do vendedor/CRM para o WhatsApp do cliente |
+| `03-ai-auto-reply.json` | Resposta automática com IA quando "Modo IA" está ativo no chat |
+| `05-notificacao-novo-lead.json` | Cria alertas/notificações visuais no CRM para a equipe de vendas |
+| `07-relatorio-diario.json` | Envia relatório diário de métricas gerais por WhatsApp pro gerente |
+| `08-whatsapp-lead-auto-pipeline.json` | (Core) Recebe mensagens SMS da UAZAPI, cria cliente, abre chat e card do Kanban |
+| `09-resync-offline-messages.json` | (Segurança) Roda a cada 4 horas puxando histórico perdido da UAZAPI |
+| `10-lembrete-pagamento.json` | (Cobrança) Roda de manhã cobrando faturas em atraso no WhatsApp |
+| `11-automacao-pipeline.json` | (Vendas) Gatilhos de 2 dias p/ Interessados e 7 dias p/ Quase Perdido |
+| `12-automacao-nps.json` | (Qualidade) Webhook pesquisa de satisfação 1 a 5 e link p/ Google My Business |
+| `13-automacao-relacionamento.json` | (Marketing) Ação de aniversário com cupom e pós-venda (30 dias) |
 
 ## Como Configurar
 

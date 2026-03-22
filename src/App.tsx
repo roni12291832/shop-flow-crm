@@ -24,7 +24,11 @@ import NpsPublic from "./pages/NpsPublic";
 import SellerMode from "./pages/SellerMode";
 import AdminPanel from "./pages/AdminPanel";
 import WhatsAppConnect from "./pages/WhatsAppConnect";
+import Inventory from "./pages/Inventory";
+import AdsDashboard from "./pages/AdsDashboard";
 import NotFound from "./pages/NotFound";
+import LiveChat from "./pages/LiveChat";
+import { AiAssistant } from "@/components/ai/AiAssistant";
 
 const queryClient = new QueryClient();
 
@@ -88,9 +92,11 @@ const AppRoutes = () => (
     <Route path="/clients" element={<AdminRoute><Clients /></AdminRoute>} />
     <Route path="/pipeline" element={<AdminRoute><Pipeline /></AdminRoute>} />
     <Route path="/tasks" element={<AdminRoute><Tasks /></AdminRoute>} />
-    <Route path="/chat" element={<AdminRoute><Chat /></AdminRoute>} />
+    <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="/ranking" element={<AdminRoute><Ranking /></AdminRoute>} />
     <Route path="/reports" element={<AdminRoute><Reports /></AdminRoute>} />
+    <Route path="/estoque" element={<AdminRoute><Inventory /></AdminRoute>} />
+    <Route path="/anuncios" element={<AdminRoute><AdsDashboard /></AdminRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
     <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />
     <Route path="/metas" element={<AdminRoute><Goals /></AdminRoute>} />
@@ -99,6 +105,7 @@ const AppRoutes = () => (
     <Route path="/nps" element={<AdminRoute><NpsDashboard /></AdminRoute>} />
     <Route path="/nps/configurar" element={<AdminRoute><NpsConfig /></AdminRoute>} />
     <Route path="/nps/:token" element={<NpsPublic />} />
+    <Route path="/livechat" element={<LiveChat />} />
     <Route path="/vendedor" element={<ProtectedRoute noLayout><SellerMode /></ProtectedRoute>} />
     <Route path="/admin" element={<ProtectedRoute noLayout><AdminPanel /></ProtectedRoute>} />
     <Route path="/whatsapp-connect" element={<AdminRoute><WhatsAppConnect /></AdminRoute>} />
@@ -114,6 +121,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <AppRoutes />
+          <AuthenticatedAiAssistant />
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
@@ -121,3 +129,9 @@ const App = () => (
 );
 
 export default App;
+
+function AuthenticatedAiAssistant() {
+  const { user } = useAuth();
+  if (!user) return null;
+  return <AiAssistant />;
+}

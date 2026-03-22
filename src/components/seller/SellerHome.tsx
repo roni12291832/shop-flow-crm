@@ -7,7 +7,7 @@ import { TrendingUp, DollarSign, ShoppingBag, Target, Trophy } from "lucide-reac
 interface RankEntry { name: string; total: number; userId: string; }
 
 export function SellerHome() {
-  const { tenantId, user, profile } = useAuth();
+  const {  user, profile } = useAuth();
   const [todaySales, setTodaySales] = useState(0);
   const [todayCount, setTodayCount] = useState(0);
   const [monthSales, setMonthSales] = useState(0);
@@ -27,7 +27,7 @@ export function SellerHome() {
       // Own sales
       const { data: sales } = await supabase.from("sales_entries")
         .select("value, sold_at, status, payment_method, created_at")
-        .eq("tenant_id", tenantId)
+        
         .eq("user_id", user.id)
         .eq("status", "confirmado")
         .gte("sold_at", startOfMonth)
@@ -42,7 +42,7 @@ export function SellerHome() {
 
       // Goals — individual first, fallback to store-wide
       const { data: goals } = await supabase.from("goals")
-        .select("*").eq("tenant_id", tenantId)
+        .select("*")
         .or(`user_id.eq.${user.id},user_id.is.null`)
         .gte("end_date", todayStr)
         .lte("start_date", todayStr);
@@ -58,13 +58,13 @@ export function SellerHome() {
       // Ranking — all sellers in tenant this month
       const { data: allSales } = await supabase.from("sales_entries")
         .select("user_id, value")
-        .eq("tenant_id", tenantId)
+        
         .eq("status", "confirmado")
         .gte("sold_at", startOfMonth);
 
       const { data: profiles } = await supabase.from("profiles")
         .select("user_id, name")
-        .eq("tenant_id", tenantId);
+        ;
 
       const profileMap: Record<string, string> = {};
       (profiles || []).forEach((p: any) => { profileMap[p.user_id] = p.name; });

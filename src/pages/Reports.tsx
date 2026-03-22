@@ -20,8 +20,7 @@ const PAYMENT_LABELS: Record<string, string> = {
 type DateRange = "month" | "last30" | "last90";
 
 export default function Reports() {
-  const { tenantId } = useAuth();
-  const [sales, setSales] = useState<any[]>([]);
+    const [sales, setSales] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [dateRange, setDateRange] = useState<DateRange>("month");
   const [activeTab, setActiveTab] = useState("pagamento");
@@ -35,13 +34,12 @@ export default function Reports() {
   };
 
   useEffect(() => {
-    if (!tenantId) return;
-    const { start, end } = getDateRange();
+        const { start, end } = getDateRange();
     const fetch = async () => {
       const [salesRes, profilesRes] = await Promise.all([
-        supabase.from("sales_entries").select("*").eq("tenant_id", tenantId)
+        supabase.from("sales_entries").select("*")
           .gte("sold_at", start.toISOString()).lte("sold_at", end.toISOString()),
-        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
+        supabase.from("profiles").select("user_id, name"),
       ]);
       setSales(salesRes.data || []);
       setProfiles(profilesRes.data || []);

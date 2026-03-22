@@ -15,7 +15,7 @@ const STATUS_STYLES: Record<string, { label: string; color: string }> = {
 };
 
 export function SellerHistory() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [sales, setSales] = useState<any[]>([]);
   const [clients, setClients] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<"all" | "today" | "week">("all");
@@ -29,7 +29,7 @@ export function SellerHistory() {
 
       let query = supabase.from("sales_entries")
         .select("*")
-        .eq("tenant_id", tenantId)
+        
         .eq("user_id", user.id)
         .order("sold_at", { ascending: false })
         .limit(50);

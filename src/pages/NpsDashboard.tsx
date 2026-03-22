@@ -20,7 +20,7 @@ const PERIOD_FILTERS = [
 const CATEGORY_FILTERS = ["Todos", "Promotores", "Neutros", "Detratores"];
 
 export default function NpsDashboard() {
-  const { tenantId, hasRole } = useAuth();
+  const {  hasRole } = useAuth();
   const navigate = useNavigate();
   const [period, setPeriod] = useState("30d");
   const [catFilter, setCatFilter] = useState("Todos");
@@ -29,15 +29,14 @@ export default function NpsDashboard() {
   const [evolution, setEvolution] = useState<{ month: string; nps: number }[]>([]);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetchData = async () => {
+        const fetchData = async () => {
       const days = PERIOD_FILTERS.find(p => p.key === period)?.days || 30;
       const from = new Date(Date.now() - days * 86400000).toISOString();
 
       const { data: surveyData } = await supabase
         .from("nps_surveys")
         .select("*")
-        .eq("tenant_id", tenantId)
+        
         .eq("status", "responded")
         .gte("responded_at", from)
         .order("responded_at", { ascending: false });
@@ -61,7 +60,7 @@ export default function NpsDashboard() {
       const { data: evoData } = await supabase
         .from("nps_surveys")
         .select("responded_at, category")
-        .eq("tenant_id", tenantId)
+        
         .eq("status", "responded")
         .gte("responded_at", sixMonths)
         .order("responded_at", { ascending: true });

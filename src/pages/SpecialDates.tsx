@@ -20,8 +20,7 @@ interface ClientBirthday {
 }
 
 export default function SpecialDates() {
-  const { tenantId } = useAuth();
-  const [clients, setClients] = useState<ClientBirthday[]>([]);
+    const [clients, setClients] = useState<ClientBirthday[]>([]);
   const [sentIds, setSentIds] = useState<Set<string>>(new Set());
   const [specialDates, setSpecialDates] = useState<any[]>([]);
   const [calendarDate, setCalendarDate] = useState<Date | undefined>();
@@ -30,12 +29,11 @@ export default function SpecialDates() {
   const [tab, setTab] = useState("birthdays");
 
   const fetchAll = async () => {
-    if (!tenantId) return;
-
+    
     const [clientsRes, campaignsRes, datesRes] = await Promise.all([
-      supabase.from("clients").select("id, name, phone, birth_date, last_purchase, ticket_medio").eq("tenant_id", tenantId).not("birth_date", "is", null),
-      supabase.from("birthday_campaigns").select("customer_id, year, status").eq("tenant_id", tenantId).eq("year", new Date().getFullYear()),
-      supabase.from("special_dates").select("*").eq("tenant_id", tenantId).order("date", { ascending: true }),
+      supabase.from("clients").select("id, name, phone, birth_date, last_purchase, ticket_medio").not("birth_date", "is", null),
+      supabase.from("birthday_campaigns").select("customer_id, year, status").eq("year", new Date().getFullYear()),
+      supabase.from("special_dates").select("*").order("date", { ascending: true }),
     ]);
 
     setClients((clientsRes.data as any[]) || []);

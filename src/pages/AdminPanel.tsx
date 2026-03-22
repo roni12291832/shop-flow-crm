@@ -32,35 +32,28 @@ export default function AdminPanel() {
 
   useEffect(() => {
     if (!isSuperAdmin) return;
-    const fetchTenants = async () => {
-      // Use service-level queries via RPC or direct queries
-      // Since super_admin has access, we query tenants
-      const { data: tenantsData } = await supabase.from("tenants").select("*").order("created_at", { ascending: false });
-      const { data: profilesData } = await supabase.from("profiles").select("tenant_id");
-      const { data: clientsData } = await supabase.from("clients").select("tenant_id");
+    const fetchStats = async () => {
+      const { count: profilesCount } = await supabase.from("profiles").select("*", { count: "exact", head: true });
+      const { count: clientsCount } = await supabase.from("clients").select("*", { count: "exact", head: true });
+      const { count: salesCount } = await supabase.from("opportunities").select("*", { count: "exact", head: true }).eq("status", "ganho");
 
-      const profileCounts: Record<string, number> = {};
-      const clientCounts: Record<string, number> = {};
-      (profilesData || []).forEach((p: any) => { profileCounts[p.tenant_id] = (profileCounts[p.tenant_id] || 0) + 1; });
-      (clientsData || []).forEach((c: any) => { clientCounts[c.tenant_id] = (clientCounts[c.tenant_id] || 0) + 1; });
-
-      const enriched = (tenantsData || []).map((t: any) => ({
-        id: t.id,
-        company_name: t.company_name,
-        plan_type: t.plan_type,
-        created_at: t.created_at,
-        member_count: profileCounts[t.id] || 0,
-        client_count: clientCounts[t.id] || 0,
-      }));
-
-      setTenants(enriched);
       setStats({
-        totalTenants: enriched.length,
-        totalUsers: (profilesData || []).length,
-        totalClients: (clientsData || []).length,
+        totalTenants: 1, // Single project now
+        totalUsers: profilesCount || 0,
+        totalClients: clientsCount || 0,
       });
+
+      // Dummy tenant list since UI mapping expects at least the current one
+      setTenants([{
+        id: "1",
+        company_name: "Projeto Único CRM",
+        plan_type: "premium",
+        created_at: new Date().toISOString(),
+        member_count: profilesCount || 0,
+        client_count: clientsCount || 0,
+      }]);
     };
-    fetchTenants();
+    fetchStats();
   }, [isSuperAdmin]);
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-background"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;

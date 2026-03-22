@@ -20,6 +20,16 @@ const STATUS_COLORS: Record<string, string> = {
   finalizada: "hsl(var(--muted-foreground))",
 };
 
+const STAGES = [
+  { value: "lead_recebido", label: "Lead Recebido" },
+  { value: "contato_iniciado", label: "Contato Iniciado" },
+  { value: "cliente_interessado", label: "Interessado" },
+  { value: "negociacao", label: "Negociação" },
+  { value: "proposta_enviada", label: "Proposta Enviada" },
+  { value: "venda_fechada", label: "Venda Fechada" },
+  { value: "perdido", label: "Perdido" },
+];
+
 interface Conversation {
   id: string;
   client_id: string | null;
@@ -49,12 +59,13 @@ interface Client {
 }
 
 export default function Chat() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [profileMap, setProfileMap] = useState<Record<string, string>>({});
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [clientOpp, setClientOpp] = useState<{ id: string, stage: string } | null>(null);
   const [msg, setMsg] = useState("");
   const [aiMode, setAiMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -63,22 +74,21 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = async () => {
-    if (!tenantId) return;
-    const { data: convs } = await supabase
+        const { data: convs } = await supabase
       .from("conversations")
       .select("*")
-      .eq("tenant_id", tenantId)
+      
       .order("last_message_at", { ascending: false });
 
     const { data: clientsData } = await supabase
       .from("clients")
       .select("id, name, phone, ticket_medio, origin")
-      .eq("tenant_id", tenantId);
+      ;
 
     const { data: profilesData } = await supabase
       .from("profiles")
       .select("user_id, name")
-      .eq("tenant_id", tenantId);
+      ;
 
     const pMap: Record<string, string> = {};
     (profilesData || []).forEach((p: any) => { pMap[p.user_id] = p.name; });
@@ -106,15 +116,30 @@ export default function Chat() {
       .eq("conversation_id", convId)
       .order("created_at", { ascending: true });
     setMessages((data || []) as Message[]);
+    
+    // Also fetch the client's latest opportunity if they exist
+    const conv = conversations.find(c => c.id === convId);
+    if (conv?.client_id && tenantId) {
+      const { data: opps } = await supabase
+        .from("opportunities")
+        .select("id, stage")
+        
+        .eq("client_id", conv.client_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+      setClientOpp(opps || null);
+    } else {
+      setClientOpp(null);
+    }
   };
 
   useEffect(() => { fetchConversations(); }, [tenantId]);
-  useEffect(() => { if (activeConvId) fetchMessages(activeConvId); }, [activeConvId]);
+  useEffect(() => { if (activeConvId) fetchMessages(activeConvId); }, [activeConvId, conversations.length]);
 
   // Realtime subscriptions
   useEffect(() => {
-    if (!tenantId) return;
-    const channel = supabase
+        const channel = supabase
       .channel("chat-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
         fetchConversations();
@@ -141,8 +166,7 @@ export default function Chat() {
 
     await supabase.from("messages").insert({
       conversation_id: activeConvId,
-      tenant_id: tenantId,
-      content,
+            content,
       sender_type: "atendente" as any,
       sender_id: user.id,
     });
@@ -152,13 +176,51 @@ export default function Chat() {
       last_message_at: new Date().toISOString(),
       status: "em_atendimento" as any,
     }).eq("id", activeConvId);
+
+    // Fetch WhatsApp config directly from DB instead of using N8N Webhooks
+    const { data: wpConfig } = await supabase
+      .from("whatsapp_instances")
+      .select("api_url, api_token, instance_name, status")
+      
+      .maybeSingle();
+
+    if (activeClient && wpConfig && wpConfig.status === "connected") {
+      try {
+        if (aiMode) {
+          // Future phase: Call AI Edge Function directly instead of Webhook
+          toast.info("A IA assumirá a resposta em breve (Funct. não atrelada ainda)");
+        } else {
+          // Direct API call to UZAPI / Evolution
+          const res = await fetch(`${wpConfig.api_url}/message/sendText/${wpConfig.instance_name}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": wpConfig.api_token
+            },
+            body: JSON.stringify({
+              number: `${activeClient.phone}@s.whatsapp.net`,
+              text: content
+            })
+          });
+          
+          if (!res.ok) {
+            console.error("Failed to send to UZAPI", await res.text());
+            toast.error("Erro ao enviar mensagem para a API do WhatsApp");
+          }
+        }
+      } catch (e) {
+        console.error("Failed to trigger WhatsApp API", e);
+        toast.error("Falha de conexão com a API do WhatsApp");
+      }
+    } else if (activeClient && (!wpConfig || wpConfig.status !== "connected")) {
+      toast.warning("WhatsApp não está conectado. Mensagem salva apenas no CRM.");
+    }
   };
 
   const createConversation = async () => {
     if (!tenantId || !user || !newConvClientId) return;
     const { error } = await supabase.from("conversations").insert({
-      tenant_id: tenantId,
-      client_id: newConvClientId,
+            client_id: newConvClientId,
       responsible_id: user.id,
       status: "aberta" as any,
     });
@@ -168,6 +230,34 @@ export default function Chat() {
       setNewConvOpen(false);
       setNewConvClientId("");
       fetchConversations();
+    }
+  };
+
+  const handleStageChange = async (newStage: string) => {
+    if (!activeClient || !tenantId || !user) return;
+    
+    if (clientOpp) {
+      // Update existing
+      const { error } = await supabase.from("opportunities").update({ stage: newStage as any }).eq("id", clientOpp.id);
+      if (error) toast.error("Erro ao atualizar etapa.");
+      else {
+        toast.success("Etapa CRM atualizada!");
+        setClientOpp({ ...clientOpp, stage: newStage });
+      }
+    } else {
+      // Create new
+      const { data, error } = await supabase.from("opportunities").insert({
+                client_id: activeClient.id,
+        title: `Oportunidade - ${activeClient.name}`,
+        stage: newStage as any,
+        responsible_id: user.id,
+      }).select("id, stage").single();
+      
+      if (error) toast.error("Erro ao criar oportunidade.");
+      else {
+        toast.success("Oportunidade criada no CRM!");
+        setClientOpp(data);
+      }
     }
   };
 
@@ -323,6 +413,19 @@ export default function Chat() {
               <div className="text-foreground text-[13px] font-semibold">{v}</div>
             </div>
           ))}
+
+          <div className="mt-4 mb-3 border-t border-border pt-4">
+            <div className="text-muted-foreground text-[11px] uppercase tracking-wider mb-1">Etapa no CRM</div>
+            <Select value={clientOpp?.stage || ""} onValueChange={handleStageChange}>
+              <SelectTrigger className="h-8 text-xs bg-sidebar text-foreground border-border/60">
+                <SelectValue placeholder="Selecione a etapa" />
+              </SelectTrigger>
+              <SelectContent>
+                {STAGES.map(s => <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
           <Button variant="outline" size="sm" className="w-full mt-2 text-[12px] border-primary/40 text-primary hover:bg-primary/10">+ Criar Tarefa</Button>
           <Button variant="outline" size="sm" className="w-full mt-2 text-[12px] border-accent/40 text-accent hover:bg-accent/10">+ Criar Oportunidade</Button>
         </div>

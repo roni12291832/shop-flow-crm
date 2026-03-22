@@ -32,7 +32,7 @@ interface Client {
 }
 
 export function QuickSaleModal({ open, onOpenChange, onSaleCreated }: QuickSaleModalProps) {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState("");
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -45,7 +45,7 @@ export function QuickSaleModal({ open, onOpenChange, onSaleCreated }: QuickSaleM
   useEffect(() => {
     if (!tenantId || !open) return;
     const fetchClients = async () => {
-      const { data } = await supabase.from("clients").select("id, name").eq("tenant_id", tenantId).order("name");
+      const { data } = await supabase.from("clients").select("id, name").order("name");
       setClients((data || []) as Client[]);
     };
     fetchClients();
@@ -72,8 +72,7 @@ export function QuickSaleModal({ open, onOpenChange, onSaleCreated }: QuickSaleM
     if (!selectedClient || !value || !tenantId || !user) return;
     setSaving(true);
     const { error } = await supabase.from("sales_entries").insert({
-      tenant_id: tenantId,
-      user_id: user.id,
+            user_id: user.id,
       customer_id: selectedClient.id,
       value: parseFloat(value.replace(/[^\d.,]/g, "").replace(",", ".")) || 0,
       payment_method: paymentMethod as any,

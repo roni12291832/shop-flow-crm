@@ -12,8 +12,7 @@ import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function NpsConfig() {
-  const { tenantId } = useAuth();
-  const navigate = useNavigate();
+    const navigate = useNavigate();
   const [settings, setSettings] = useState({
     auto_send_after_sale: false,
     auto_send_after_conversation: false,
@@ -26,12 +25,11 @@ export default function NpsConfig() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetch = async () => {
+        const fetch = async () => {
       const { data } = await supabase
         .from("nps_settings")
         .select("*")
-        .eq("tenant_id", tenantId)
+        
         .single();
       if (data) {
         setSettings({
@@ -49,12 +47,11 @@ export default function NpsConfig() {
   }, [tenantId]);
 
   const handleSave = async () => {
-    if (!tenantId) return;
-    setSaving(true);
+        setSaving(true);
     try {
-      const payload = { ...settings, tenant_id: tenantId };
+      const payload = { ...settings, };
       if (existing) {
-        await supabase.from("nps_settings").update(payload).eq("tenant_id", tenantId);
+        await supabase.from("nps_settings").update(payload);
       } else {
         await supabase.from("nps_settings").insert(payload);
         setExisting(true);

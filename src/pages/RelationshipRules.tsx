@@ -17,7 +17,6 @@ interface Rule {
   channel: "whatsapp" | "sms" | "email";
   active: boolean;
   message_template: string;
-  tenant_id: string;
 }
 
 interface Execution {
@@ -33,7 +32,7 @@ interface Execution {
 }
 
 export default function RelationshipRules() {
-  const { tenantId, hasRole } = useAuth();
+  const {  hasRole } = useAuth();
   const [rules, setRules] = useState<Rule[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [executionCounts, setExecutionCounts] = useState<Record<string, number>>({});
@@ -44,19 +43,18 @@ export default function RelationshipRules() {
   const canManage = hasRole("admin") || hasRole("gerente");
 
   const fetchData = useCallback(async () => {
-    if (!tenantId) return;
-    setLoading(true);
+        setLoading(true);
 
     const [{ data: rulesData }, { data: execData }] = await Promise.all([
       supabase
         .from("relationship_rules")
         .select("*")
-        .eq("tenant_id", tenantId)
+        
         .order("created_at", { ascending: false }),
       supabase
         .from("relationship_executions")
         .select("*, rule:relationship_rules(name, channel), customer:clients(name, phone)")
-        .eq("tenant_id", tenantId)
+        
         .order("scheduled_for", { ascending: true })
         .limit(100),
     ]);
@@ -73,7 +71,7 @@ export default function RelationshipRules() {
     }
 
     setLoading(false);
-  }, [tenantId]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -92,8 +90,7 @@ export default function RelationshipRules() {
   };
 
   const handleSave = async (data: any) => {
-    if (!tenantId) return;
-
+    
     if (editingRule?.id) {
       const { error } = await supabase
         .from("relationship_rules")
@@ -105,7 +102,7 @@ export default function RelationshipRules() {
     } else {
       const { error } = await supabase
         .from("relationship_rules")
-        .insert([{ ...data, tenant_id: tenantId }]);
+        .insert([{ ...data, }]);
 
       if (error) { toast.error("Erro ao criar régua"); return; }
       toast.success("Régua criada!");
@@ -117,11 +114,10 @@ export default function RelationshipRules() {
   };
 
   const handleDuplicate = async (rule: Rule) => {
-    if (!tenantId) return;
-    const { id, tenant_id, ...rest } = rule;
+        const { id, ...rest } = rule;
     const { error } = await supabase
       .from("relationship_rules")
-      .insert([{ ...rest, tenant_id: tenantId, name: `${rest.name} (cópia)`, active: false }]);
+      .insert([{ ...rest,  name: `${rest.name} (cópia)`, active: false }]);
 
     if (error) { toast.error("Erro ao duplicar"); return; }
     toast.success("Régua duplicada!");

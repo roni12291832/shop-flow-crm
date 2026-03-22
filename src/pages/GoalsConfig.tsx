@@ -15,7 +15,7 @@ interface Profile { user_id: string; name: string; }
 interface Goal { id: string; user_id: string | null; period_type: string; target_value: number; start_date: string; end_date: string; }
 
 export default function GoalsConfig() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const navigate = useNavigate();
   const [periodType, setPeriodType] = useState<"daily" | "weekly" | "monthly">("daily");
   const [storeGoal, setStoreGoal] = useState("");
@@ -34,11 +34,10 @@ export default function GoalsConfig() {
   })();
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetch_ = async () => {
+        const fetch_ = async () => {
       const [{ data: profs }, { data: goals }] = await Promise.all([
-        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
-        supabase.from("goals").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }),
+        supabase.from("profiles").select("user_id, name"),
+        supabase.from("goals").select("*").order("created_at", { ascending: false }),
       ]);
       setProfiles((profs || []) as Profile[]);
       setExistingGoals((goals || []) as Goal[]);
@@ -64,7 +63,7 @@ export default function GoalsConfig() {
     // Store goal
     if (storeGoal) {
       goalsToInsert.push({
-        tenant_id: tenantId, user_id: null, period_type: periodType,
+         user_id: null, period_type: periodType,
         target_value: parseFloat(storeGoal), start_date: startDate, end_date: endDate, created_by: user.id,
       });
     }
@@ -73,7 +72,7 @@ export default function GoalsConfig() {
     Object.entries(individualGoals).forEach(([userId, value]) => {
       if (value && parseFloat(value) > 0) {
         goalsToInsert.push({
-          tenant_id: tenantId, user_id: userId, period_type: periodType,
+           user_id: userId, period_type: periodType,
           target_value: parseFloat(value), start_date: startDate, end_date: endDate, created_by: user.id,
         });
       }
@@ -87,7 +86,7 @@ export default function GoalsConfig() {
     else {
       toast.success("Metas salvas com sucesso!");
       // Refresh
-      const { data } = await supabase.from("goals").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
+      const { data } = await supabase.from("goals").select("*").order("created_at", { ascending: false });
       setExistingGoals((data || []) as Goal[]);
       setStoreGoal(""); setIndividualGoals({});
     }

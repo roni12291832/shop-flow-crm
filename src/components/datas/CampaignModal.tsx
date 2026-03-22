@@ -25,8 +25,7 @@ interface CampaignModalProps {
 const AVAILABLE_TAGS = ["VIP", "Recorrente", "Novo", "Homens", "Mulheres", "Inativo"];
 
 export function CampaignModal({ open, onClose, onSaved, editingCampaign }: CampaignModalProps) {
-  const { tenantId } = useAuth();
-  const [name, setName] = useState("");
+    const [name, setName] = useState("");
   const [date, setDate] = useState<Date>();
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [messageTemplate, setMessageTemplate] = useState("");
@@ -47,7 +46,7 @@ export function CampaignModal({ open, onClose, onSaved, editingCampaign }: Campa
   useEffect(() => {
     if (!tenantId || !open) return;
     const fetchEstimate = async () => {
-      let query = supabase.from("clients").select("id", { count: "exact" }).eq("tenant_id", tenantId);
+      let query = supabase.from("clients").select("id", { count: "exact" });
       if (selectedTags.length > 0) {
         query = query.overlaps("tags", selectedTags);
       }
@@ -70,8 +69,7 @@ export function CampaignModal({ open, onClose, onSaved, editingCampaign }: Campa
     setSaving(true);
     try {
       const payload = {
-        tenant_id: tenantId,
-        name,
+                name,
         date: format(date, "yyyy-MM-dd"),
         segment_tags: selectedTags,
         message_template: messageTemplate,

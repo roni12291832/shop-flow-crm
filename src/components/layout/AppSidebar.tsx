@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi, Package, Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,8 @@ const navItems = [
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
+  { icon: Package, label: "Estoque", path: "/estoque" },
+  { icon: Megaphone, label: "Anúncios", path: "/anuncios" },
   { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" },
   { icon: Smartphone, label: "Modo Vendedor", path: "/vendedor" },
 ];
@@ -38,7 +40,7 @@ const navItems = [
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, roles, signOut, tenantId, user } = useAuth();
+  const { profile, roles, signOut, user } = useAuth();
   const [chatCount, setChatCount] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
   const [tenantInfo, setTenantInfo] = useState<{ company_name: string; logo_url: string | null } | null>(null);
@@ -49,7 +51,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     if (!tenantId || !user) return;
     const fetchCounts = async () => {
       const [{ count: convCount }, { count: nCount }] = await Promise.all([
-        supabase.from("conversations").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "aberta"),
+        supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "aberta"),
         supabase.from("notifications").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("read", false),
       ]);
       setChatCount(convCount || 0);

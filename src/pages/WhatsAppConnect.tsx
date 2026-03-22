@@ -9,7 +9,7 @@ import { Smartphone, QrCode, Wifi, WifiOff, RefreshCw, Save, AlertTriangle } fro
 import { toast } from "sonner";
 
 export default function WhatsAppConnect() {
-  const { tenantId, hasRole } = useAuth();
+  const {  hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const [apiUrl, setApiUrl] = useState("");
   const [apiToken, setApiToken] = useState("");
@@ -18,27 +18,76 @@ export default function WhatsAppConnect() {
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [dbRecordId, setDbRecordId] = useState<string | null>(null);
 
-  // Load saved config from tenant settings (using localStorage for now, ideally DB)
+  // Load saved config from DB
   useEffect(() => {
-    const savedConfig = localStorage.getItem(`whatsapp_config_${tenantId}`);
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      setApiUrl(config.apiUrl || "");
-      setApiToken(config.apiToken || "");
-      setInstanceName(config.instanceName || "");
-      setSaved(true);
-    }
+    const fetchConfig = async () => {
+            
+      const { data, error } = await supabase
+        .from("whatsapp_instances")
+        .select("*")
+        
+        .maybeSingle();
+
+      if (data) {
+        setDbRecordId(data.id);
+        setApiUrl(data.api_url);
+        setApiToken(data.api_token);
+        setInstanceName(data.instance_name);
+        setStatus((data.status as any) || "disconnected");
+        setSaved(true);
+      }
+    };
+    fetchConfig();
   }, [tenantId]);
 
-  const saveConfig = () => {
+  const saveConfig = async () => {
     if (!apiUrl || !apiToken || !instanceName) {
       toast.error("Preencha todos os campos");
       return;
     }
-    localStorage.setItem(`whatsapp_config_${tenantId}`, JSON.stringify({ apiUrl, apiToken, instanceName }));
+    
+    setLoading(true);
+    
+    let error;
+    if (dbRecordId) {
+      const res = await supabase.from("whatsapp_instances").update({
+        api_url: apiUrl,
+        api_token: apiToken,
+        instance_name: instanceName,
+        status,
+      }).eq("id", dbRecordId);
+      error = res.error;
+    } else {
+      const res = await supabase.from("whatsapp_instances").insert({
+        !,
+        api_url: apiUrl,
+        api_token: apiToken,
+        instance_name: instanceName,
+        status,
+      }).select().single();
+      error = res.error;
+      if (res.data) setDbRecordId(res.data.id);
+    }
+
+    setLoading(false);
+    
+    if (error) {
+      toast.error("Erro ao salvar no banco");
+      console.error(error);
+      return;
+    }
+    
     setSaved(true);
-    toast.success("Configuração salva!");
+    toast.success("Configuração salva no banco de dados!");
+  };
+
+  const updateStatusInDb = async (newStatus: string) => {
+    if (dbRecordId) {
+      await supabase.from("whatsapp_instances").update({ status: newStatus }).eq("id", dbRecordId);
+    }
+    setStatus(newStatus as "disconnected" | "connecting" | "connected");
   };
 
   const checkStatus = async () => {
@@ -50,13 +99,13 @@ export default function WhatsAppConnect() {
       });
       const data = await res.json();
       if (data?.status === "open" || data?.instance?.state === "open") {
-        setStatus("connected");
+        await updateStatusInDb("connected");
         setQrCode(null);
       } else {
-        setStatus("disconnected");
+        await updateStatusInDb("disconnected");
       }
     } catch {
-      setStatus("disconnected");
+      await updateStatusInDb("disconnected");
     }
     setLoading(false);
   };
@@ -67,7 +116,7 @@ export default function WhatsAppConnect() {
       return;
     }
     setLoading(true);
-    setStatus("connecting");
+    await updateStatusInDb("connecting");
     try {
       // Try to create instance first
       await fetch(`${apiUrl}/instance/create`, {
@@ -89,15 +138,15 @@ export default function WhatsAppConnect() {
         setQrCode(data.base64 || data.qrcode.base64);
         toast.success("QR Code gerado! Escaneie com o WhatsApp");
       } else if (data?.instance?.state === "open") {
-        setStatus("connected");
+        await updateStatusInDb("connected");
         toast.success("WhatsApp já está conectado!");
       } else {
         toast.error("Não foi possível gerar o QR Code");
-        setStatus("disconnected");
+        await updateStatusInDb("disconnected");
       }
     } catch (err) {
       toast.error("Erro ao conectar com a API UAZAPI");
-      setStatus("disconnected");
+      await updateStatusInDb("disconnected");
     }
     setLoading(false);
   };
@@ -110,7 +159,7 @@ export default function WhatsAppConnect() {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${apiToken}` },
       });
-      setStatus("disconnected");
+      await updateStatusInDb("disconnected");
       setQrCode(null);
       toast.info("WhatsApp desconectado");
     } catch {
@@ -145,15 +194,15 @@ export default function WhatsAppConnect() {
 
         {status === "connected" && (
           <div className="bg-chart-2/10 border border-chart-2/30 rounded-xl p-4 text-sm text-chart-2 mb-4">
-            ✅ WhatsApp conectado! Novos leads do WhatsApp aparecerão automaticamente no Fluxo CRM como "Lead Recebido".
+            ✅ WhatsApp conectado! Seu CRM já pode enviar e receber mensagens automaticamente.
           </div>
         )}
 
         <div className="bg-secondary/50 border border-border rounded-xl p-4 text-sm text-muted-foreground mb-4 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-chart-3" />
           <div>
-            <p className="font-semibold text-foreground mb-1">Importante sobre persistência</p>
-            <p>Mesmo que o celular seja desconectado, todos os leads já recebidos permanecem salvos no banco de dados. Ao reconectar, novos leads continuarão sendo cadastrados automaticamente.</p>
+            <p className="font-semibold text-foreground mb-1">Conexão Persistente</p>
+            <p>Seus dados de conexão são protegidos no banco de dados. Qualquer atendente da loja pode usar a mesma conexão para enviar mensagens. Não é necessário manter a tela aberta.</p>
           </div>
         </div>
       </div>
@@ -161,7 +210,7 @@ export default function WhatsAppConnect() {
       {/* API Config */}
       {isAdmin && (
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
-          <h3 className="text-foreground font-bold text-base">Configuração UAZAPI</h3>
+          <h3 className="text-foreground font-bold text-base">Configuração UAZAPI / Evolution</h3>
           <div className="space-y-2">
             <Label>URL da API</Label>
             <Input value={apiUrl} onChange={e => setApiUrl(e.target.value)} placeholder="https://sua-instancia.uazapi.com" />
@@ -174,7 +223,7 @@ export default function WhatsAppConnect() {
             <Label>Nome da Instância</Label>
             <Input value={instanceName} onChange={e => setInstanceName(e.target.value)} placeholder="minha-loja" />
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-2">
             <Button onClick={saveConfig} className="gap-1.5"><Save className="h-4 w-4" /> Salvar Config</Button>
             {saved && <Button variant="outline" onClick={checkStatus} disabled={loading} className="gap-1.5"><RefreshCw className="h-4 w-4" /> Verificar Status</Button>}
           </div>
@@ -216,7 +265,7 @@ export default function WhatsAppConnect() {
             )}
           </div>
 
-          <p className="text-xs text-muted-foreground text-center max-w-md">
+          <p className="text-xs text-muted-foreground text-center max-w-md mt-2">
             Abra o WhatsApp no celular → Menu (⋮) → Dispositivos Conectados → Conectar Dispositivo → Escaneie o QR Code acima
           </p>
         </div>

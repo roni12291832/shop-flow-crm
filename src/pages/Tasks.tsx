@@ -31,7 +31,7 @@ interface Client { id: string; name: string; }
 interface ProfileItem { user_id: string; name: string; }
 
 export default function Tasks() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [members, setMembers] = useState<ProfileItem[]>([]);
@@ -40,11 +40,10 @@ export default function Tasks() {
   const [form, setForm] = useState({ title: "", description: "", due_date: "", client_id: "", status: "pendente", priority: "media", responsible_id: "" });
 
   const fetchData = async () => {
-    if (!tenantId) return;
-    const [t, c, m] = await Promise.all([
-      supabase.from("tasks").select("*").eq("tenant_id", tenantId).order("due_date", { ascending: true, nullsFirst: false }),
-      supabase.from("clients").select("id, name").eq("tenant_id", tenantId),
-      supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
+        const [t, c, m] = await Promise.all([
+      supabase.from("tasks").select("*").order("due_date", { ascending: true, nullsFirst: false }),
+      supabase.from("clients").select("id, name"),
+      supabase.from("profiles").select("user_id, name"),
     ]);
     if (t.data) setTasks(t.data as Task[]);
     if (c.data) setClients(c.data as Client[]);
@@ -57,7 +56,7 @@ export default function Tasks() {
     e.preventDefault();
     if (!tenantId || !user) return;
     const { error } = await supabase.from("tasks").insert({
-      tenant_id: tenantId, title: form.title, description: form.description || null,
+       title: form.title, description: form.description || null,
       due_date: form.due_date || null, client_id: form.client_id || null,
       responsible_id: form.responsible_id || null, status: form.status as any, priority: form.priority as any,
     });

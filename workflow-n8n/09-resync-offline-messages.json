@@ -1,0 +1,69 @@
+{
+  "name": "09 - Resync Offline Messages",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "resync-messages",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "i1b2c3d4-0009-0009-0009-000000000001",
+      "name": "Webhook Resync",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const msgs = $input.first().json.messages || [];\nreturn msgs.map(m => ({ json: m }));"
+      },
+      "id": "i1b2c3d4-0009-0009-0009-000000000002",
+      "name": "Extrair Mensagens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "resolution=ignore-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "conversation_id", "value": "={{ $json.conversation_id }}" },
+            { "name": "content", "value": "={{ $json.content }}" },
+            { "name": "sender_type", "value": "={{ $json.sender_type }}" },
+            { "name": "sent_at", "value": "={{ $json.sent_at }}" },
+            { "name": "tenant_id", "value": "={{ $json.tenant_id }}" }
+          ]
+        }
+      },
+      "id": "i1b2c3d4-0009-0009-0009-000000000003",
+      "name": "Inserir Mensagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Resync": {
+      "main": [[{ "node": "Extrair Mensagens", "type": "main", "index": 0 }]]
+    },
+    "Extrair Mensagens": {
+      "main": [[{ "node": "Inserir Mensagem", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "CRM" }]
+}

@@ -39,8 +39,7 @@ interface Metrics {
 }
 
 export default function Dashboard() {
-  const { tenantId } = useAuth();
-  const navigate = useNavigate();
+    const navigate = useNavigate();
   const [dateFilter, setDateFilter] = useState("30d");
   const [metrics, setMetrics] = useState<Metrics>({
     totalClients: 0, totalOpportunities: 0, totalRevenue: 0, conversionRate: 0,
@@ -48,19 +47,18 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetchMetrics = async () => {
+        const fetchMetrics = async () => {
       const dateFrom = dateFilter === "all" ? undefined : new Date(Date.now() - (dateFilter === "7d" ? 7 : dateFilter === "30d" ? 30 : 90) * 86400000).toISOString();
 
-      let oppsQuery = supabase.from("opportunities").select("id, stage, estimated_value, responsible_id, created_at").eq("tenant_id", tenantId);
+      let oppsQuery = supabase.from("opportunities").select("id, stage, estimated_value, responsible_id, created_at");
       if (dateFrom) oppsQuery = oppsQuery.gte("created_at", dateFrom);
 
       const [clientsRes, oppsRes, tasksRes, profilesRes, completedTasksRes] = await Promise.all([
-        supabase.from("clients").select("id", { count: "exact" }).eq("tenant_id", tenantId),
+        supabase.from("clients").select("id", { count: "exact" }),
         oppsQuery,
-        supabase.from("tasks").select("id, title, status, due_date, client_id, priority").eq("tenant_id", tenantId).eq("status", "pendente").order("due_date", { ascending: true }).limit(4),
-        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
-        supabase.from("tasks").select("responsible_id, status").eq("tenant_id", tenantId).eq("status", "concluido"),
+        supabase.from("tasks").select("id, title, status, due_date, client_id, priority").eq("status", "pendente").order("due_date", { ascending: true }).limit(4),
+        supabase.from("profiles").select("user_id, name"),
+        supabase.from("tasks").select("responsible_id, status").eq("status", "concluido"),
       ]);
 
       const clients = clientsRes.data || []; const opps = oppsRes.data || [];

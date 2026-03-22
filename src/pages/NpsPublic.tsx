@@ -8,7 +8,10 @@ import { cn } from "@/lib/utils";
 export default function NpsPublic() {
   const { token } = useParams<{ token: string }>();
   const [survey, setSurvey] = useState<any>(null);
-  const [tenant, setTenant] = useState<any>(null);
+  const [tenant, setTenant] = useState<any>({
+    company_name: "Avaliação",
+    primary_color: "#2563eb"
+  });
   const [customer, setCustomer] = useState<any>(null);
   const [selectedScore, setSelectedScore] = useState<number | null>(null);
   const [comment, setComment] = useState("");
@@ -40,13 +43,13 @@ export default function NpsPublic() {
 
       setSurvey(data);
 
-      const [tenantRes, customerRes] = await Promise.all([
-        supabase.from("tenants").select("company_name, primary_color, logo_url").eq("id", data.tenant_id).single(),
+      const [customerRes] = await Promise.all([
         supabase.from("clients").select("name").eq("id", data.customer_id).single(),
       ]);
 
-      setTenant(tenantRes.data);
-      setCustomer(customerRes.data);
+      if (customerRes.data) {
+        setCustomer(customerRes.data);
+      }
       setLoading(false);
     };
     fetchSurvey();

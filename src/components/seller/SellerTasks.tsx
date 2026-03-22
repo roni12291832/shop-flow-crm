@@ -27,7 +27,7 @@ interface Task {
 }
 
 export function SellerTasks() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState("pendente");
 
@@ -37,7 +37,7 @@ export function SellerTasks() {
     const { data } = await supabase
       .from("tasks")
       .select("id, title, description, status, priority, due_date, responsible_id")
-      .eq("tenant_id", tenantId)
+      
       .or(`responsible_id.eq.${user.id},responsible_id.is.null`)
       .order("due_date", { ascending: true, nullsFirst: false });
     setTasks((data || []) as Task[]);

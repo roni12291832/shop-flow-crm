@@ -2,10 +2,47 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
+function hexToHsl(hex: string): string {
+  if (!hex) return "";
+  hex = hex.replace(/^#/, '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  if (hex.length !== 6) return "";
+  
+  const r = parseInt(hex.substring(0, 2), 16) / 255;
+  const g = parseInt(hex.substring(2, 4), 16) / 255;
+  const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+}
+
+export function applyThemeColors(primary?: string | null, secondary?: string | null) {
+  if (primary) {
+    const hsl = hexToHsl(primary);
+    if (hsl) {
+      document.documentElement.style.setProperty("--primary", hsl);
+      document.documentElement.style.setProperty("--chart-1", hsl);
+      document.documentElement.style.setProperty("--ring", hsl);
+    }
+  }
+}
+
 interface Profile {
   id: string;
   user_id: string;
-  tenant_id: string;
   name: string;
   email: string;
   avatar_url: string | null;
@@ -20,7 +57,6 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   roles: string[];
-  tenantId: string | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
@@ -43,7 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .select("*")
       .eq("user_id", userId)
       .single();
-    if (data) setProfile(data as Profile);
+    if (data) {
+      setProfile(data as Profile);
+    }
     return data as Profile | null;
   };
 
@@ -123,7 +161,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         roles,
-        tenantId: profile?.tenant_id ?? null,
         loading,
         signIn,
         signUp,

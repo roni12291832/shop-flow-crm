@@ -15,7 +15,7 @@ interface RankEntry {
 }
 
 export function SellerRanking() {
-  const { tenantId, user } = useAuth();
+  const {  user } = useAuth();
   const [ranking, setRanking] = useState<RankEntry[]>([]);
   const [myPosition, setMyPosition] = useState(0);
   const [period, setPeriod] = useState<"month" | "all">("month");
@@ -29,7 +29,7 @@ export function SellerRanking() {
 
       let salesQuery = supabase.from("sales_entries")
         .select("user_id, value")
-        .eq("tenant_id", tenantId)
+        
         .eq("status", "confirmado");
 
       if (period === "month") {
@@ -38,7 +38,7 @@ export function SellerRanking() {
 
       let oppsQuery = supabase.from("opportunities")
         .select("responsible_id, stage, estimated_value")
-        .eq("tenant_id", tenantId);
+        ;
 
       if (period === "month") {
         oppsQuery = oppsQuery.gte("created_at", startOfMonth);
@@ -46,9 +46,9 @@ export function SellerRanking() {
 
       const [{ data: sales }, { data: profiles }, { data: opps }, { data: tasks }] = await Promise.all([
         salesQuery,
-        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
+        supabase.from("profiles").select("user_id, name"),
         oppsQuery,
-        supabase.from("tasks").select("responsible_id, status").eq("tenant_id", tenantId).eq("status", "concluido"),
+        supabase.from("tasks").select("responsible_id, status").eq("status", "concluido"),
       ]);
 
       const profileMap: Record<string, string> = {};

@@ -10,16 +10,14 @@ interface SellerStats {
 }
 
 export default function Ranking() {
-  const { tenantId } = useAuth();
-  const [sellers, setSellers] = useState<SellerStats[]>([]);
+    const [sellers, setSellers] = useState<SellerStats[]>([]);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetchRanking = async () => {
+        const fetchRanking = async () => {
       const [{ data: profiles }, { data: opps }, { data: tasks }] = await Promise.all([
-        supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId),
-        supabase.from("opportunities").select("responsible_id, stage, estimated_value").eq("tenant_id", tenantId),
-        supabase.from("tasks").select("responsible_id, status").eq("tenant_id", tenantId).eq("status", "concluido"),
+        supabase.from("profiles").select("user_id, name"),
+        supabase.from("opportunities").select("responsible_id, stage, estimated_value"),
+        supabase.from("tasks").select("responsible_id, status").eq("status", "concluido"),
       ]);
       const stats: SellerStats[] = (profiles || []).map((p) => {
         const userOpps = (opps || []).filter((o) => o.responsible_id === p.user_id);

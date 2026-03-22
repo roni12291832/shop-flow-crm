@@ -35,8 +35,7 @@ interface ClientDetailDrawerProps {
 }
 
 export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: ClientDetailDrawerProps) {
-  const { tenantId } = useAuth();
-  const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "", tags: "" });
+    const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "", tags: "" });
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);

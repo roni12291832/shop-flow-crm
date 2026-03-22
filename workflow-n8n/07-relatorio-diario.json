@@ -1,73 +1,87 @@
 {
-  "name": "07 - Relatório Diário",
-  "description": "Todos os dias às 8h, gera um resumo de métricas do dia anterior e envia por email ou WhatsApp para os gerentes.",
+  "name": "07 - Relatorio Diario",
   "nodes": [
     {
-      "name": "Cron - 8h todo dia",
-      "type": "n8n-nodes-base.scheduleTrigger",
       "parameters": {
-        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }] }
-      }
-    },
-    {
-      "name": "Buscar Métricas do Dia",
-      "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "GET",
-        "url": "={{$env.SUPABASE_URL}}/rest/v1/opportunities?created_at=gte.{{$now.minus(1,'days').startOf('day').toISO()}}&select=id,stage,estimated_value",
-        "headers": {
-          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
-          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
-        }
-      }
-    },
-    {
-      "name": "Buscar Novos Clientes",
-      "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "GET",
-        "url": "={{$env.SUPABASE_URL}}/rest/v1/clients?created_at=gte.{{$now.minus(1,'days').startOf('day').toISO()}}&select=id",
-        "headers": {
-          "apikey": "={{$env.SUPABASE_SERVICE_KEY}}",
-          "Authorization": "Bearer {{$env.SUPABASE_SERVICE_KEY}}"
-        }
-      }
-    },
-    {
-      "name": "Calcular Métricas",
-      "type": "n8n-nodes-base.code",
-      "parameters": {
-        "jsCode": "const opps = $input.first().json;\nconst clients = $('Buscar Novos Clientes').first().json;\nconst closed = Array.isArray(opps) ? opps.filter(o => o.stage === 'venda_fechada') : [];\nconst revenue = closed.reduce((s, o) => s + (o.estimated_value || 0), 0);\nreturn [{ json: {\n  total_opps: Array.isArray(opps) ? opps.length : 0,\n  closed_deals: closed.length,\n  revenue,\n  new_clients: Array.isArray(clients) ? clients.length : 0\n}}];"
-      }
-    },
-    {
-      "name": "Montar Mensagem",
-      "type": "n8n-nodes-base.set",
-      "parameters": {
-        "values": {
-          "string": [{
-            "name": "report",
-            "value": "📊 *Relatório Diário - StoreCRM*\n\n🆕 Novos leads: {{$json.total_opps}}\n💰 Vendas fechadas: {{$json.closed_deals}}\n💵 Receita: R$ {{$json.revenue}}\n👥 Novos clientes: {{$json.new_clients}}\n\n_Gerado automaticamente pelo CRM_"
-          }]
-        }
-      }
-    },
-    {
-      "name": "Enviar via WhatsApp",
-      "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "POST",
-        "url": "={{$env.WHATSAPP_API_URL}}/message/sendText/default",
-        "headers": {
-          "apikey": "={{$env.WHATSAPP_API_KEY}}",
-          "Content-Type": "application/json"
-        },
-        "body": {
-          "number": "NUMERO_DO_GERENTE@s.whatsapp.net",
-          "text": "={{$json.report}}"
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1-5" }]
         }
       },
-      "notes": "Envia relatório diário por WhatsApp para o gerente. Substitua NUMERO_DO_GERENTE pelo número real."
+      "id": "c1b2c3d4-0007-0007-0007-000000000001",
+      "name": "Todo Dia Util 7h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/sales_entries?status=eq.confirmado&sold_at=gte.{{ new Date(Date.now() - 86400000).toISOString().split('T')[0] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" }
+          ]
+        }
+      },
+      "id": "c1b2c3d4-0007-0007-0007-000000000002",
+      "name": "Buscar Vendas Ontem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const sales = $input.all();\nconst total = sales.reduce((sum, s) => sum + (s.json.value || 0), 0);\nconst count = sales.length;\nreturn [{ json: { total, count, message: `📊 Relatório do dia:\\n${count} vendas\\nTotal: R$ ${total.toFixed(2)}` } }];"
+      },
+      "id": "c1b2c3d4-0007-0007-0007-000000000003",
+      "name": "Calcular Totais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "tenant_id", "value": "={{ $env.DEFAULT_TENANT_ID }}" },
+            { "name": "user_id", "value": "={{ $env.ADMIN_USER_ID }}" },
+            { "name": "title", "value": "📊 Relatório Diário de Vendas" },
+            { "name": "message", "value": "={{ $json.message }}" }
+          ]
+        }
+      },
+      "id": "c1b2c3d4-0007-0007-0007-000000000004",
+      "name": "Notificar Admin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [960, 300]
     }
-  ]
+  ],
+  "connections": {
+    "Todo Dia Util 7h": {
+      "main": [[{ "node": "Buscar Vendas Ontem", "type": "main", "index": 0 }]]
+    },
+    "Buscar Vendas Ontem": {
+      "main": [[{ "node": "Calcular Totais", "type": "main", "index": 0 }]]
+    },
+    "Calcular Totais": {
+      "main": [[{ "node": "Notificar Admin", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "CRM" }]
 }

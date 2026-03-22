@@ -14,6 +14,176 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_accounts: {
+        Row: {
+          id: string
+          platform: string
+          account_id: string
+          account_name: string | null
+          access_token: string | null
+          refresh_token: string | null
+          token_expiry: string | null
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          platform: string
+          account_id: string
+          account_name?: string | null
+          access_token?: string | null
+          refresh_token?: string | null
+          token_expiry?: string | null
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          platform?: string
+          account_id?: string
+          account_name?: string | null
+          access_token?: string | null
+          refresh_token?: string | null
+          token_expiry?: string | null
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ad_campaigns: {
+        Row: {
+          id: string
+          ad_account_id: string
+          platform_campaign_id: string
+          name: string
+          status: string | null
+          objective: string | null
+          budget_daily: number
+          budget_total: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          ad_account_id: string
+          platform_campaign_id: string
+          name: string
+          status?: string | null
+          objective?: string | null
+          budget_daily?: number
+          budget_total?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          ad_account_id?: string
+          platform_campaign_id?: string
+          name?: string
+          status?: string | null
+          objective?: string | null
+          budget_daily?: number
+          budget_total?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_campaigns_ad_account_id_fkey"
+            columns: ["ad_account_id"]
+            isOneToOne: false
+            referencedRelation: "ad_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_campaigns_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ad_metrics: {
+        Row: {
+          id: string
+          campaign_id: string
+          date: string
+          impressions: number
+          clicks: number
+          ctr: number
+          cpc: number
+          cpm: number
+          spend: number
+          conversions: number
+          conversion_value: number
+          roas: number
+          reach: number
+          frequency: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          date: string
+          impressions?: number
+          clicks?: number
+          ctr?: number
+          cpc?: number
+          cpm?: number
+          spend?: number
+          conversions?: number
+          conversion_value?: number
+          roas?: number
+          reach?: number
+          frequency?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          campaign_id?: string
+          date?: string
+          impressions?: number
+          clicks?: number
+          ctr?: number
+          cpc?: number
+          cpm?: number
+          spend?: number
+          conversions?: number
+          conversion_value?: number
+          roas?: number
+          reach?: number
+          frequency?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "ad_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_metrics_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activities: {
         Row: {
           client_id: string | null
@@ -21,7 +191,6 @@ export type Database = {
           description: string | null
           id: string
           opportunity_id: string | null
-          tenant_id: string
           type: string
           user_id: string
         }
@@ -31,7 +200,6 @@ export type Database = {
           description?: string | null
           id?: string
           opportunity_id?: string | null
-          tenant_id: string
           type: string
           user_id: string
         }
@@ -41,7 +209,6 @@ export type Database = {
           description?: string | null
           id?: string
           opportunity_id?: string | null
-          tenant_id?: string
           type?: string
           user_id?: string
         }
@@ -76,7 +243,6 @@ export type Database = {
           id: string
           sent_at: string | null
           status: string
-          tenant_id: string
           year: number
         }
         Insert: {
@@ -85,7 +251,6 @@ export type Database = {
           id?: string
           sent_at?: string | null
           status?: string
-          tenant_id: string
           year: number
         }
         Update: {
@@ -94,7 +259,6 @@ export type Database = {
           id?: string
           sent_at?: string | null
           status?: string
-          tenant_id?: string
           year?: number
         }
         Relationships: [
@@ -129,8 +293,9 @@ export type Database = {
           phone: string | null
           responsible_id: string | null
           tags: string[] | null
-          tenant_id: string
           ticket_medio: number | null
+          score: number | null
+          temperature: string | null
           updated_at: string
         }
         Insert: {
@@ -147,8 +312,9 @@ export type Database = {
           phone?: string | null
           responsible_id?: string | null
           tags?: string[] | null
-          tenant_id: string
           ticket_medio?: number | null
+          score?: number | null
+          temperature?: string | null
           updated_at?: string
         }
         Update: {
@@ -165,8 +331,9 @@ export type Database = {
           phone?: string | null
           responsible_id?: string | null
           tags?: string[] | null
-          tenant_id?: string
           ticket_medio?: number | null
+          score?: number | null
+          temperature?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -188,7 +355,6 @@ export type Database = {
           last_message_at: string | null
           responsible_id: string | null
           status: Database["public"]["Enums"]["conversation_status"]
-          tenant_id: string
           updated_at: string
         }
         Insert: {
@@ -199,7 +365,6 @@ export type Database = {
           last_message_at?: string | null
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
-          tenant_id: string
           updated_at?: string
         }
         Update: {
@@ -210,7 +375,6 @@ export type Database = {
           last_message_at?: string | null
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["conversation_status"]
-          tenant_id?: string
           updated_at?: string
         }
         Relationships: [
@@ -239,7 +403,6 @@ export type Database = {
           period_type: Database["public"]["Enums"]["goal_period_type"]
           start_date: string
           target_value: number
-          tenant_id: string
           user_id: string | null
         }
         Insert: {
@@ -250,7 +413,6 @@ export type Database = {
           period_type?: Database["public"]["Enums"]["goal_period_type"]
           start_date: string
           target_value?: number
-          tenant_id: string
           user_id?: string | null
         }
         Update: {
@@ -261,12 +423,124 @@ export type Database = {
           period_type?: Database["public"]["Enums"]["goal_period_type"]
           start_date?: string
           target_value?: number
-          tenant_id?: string
           user_id?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "goals_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_movements: {
+        Row: {
+          id: string
+          product_id: string
+          type: Database["public"]["Enums"]["inventory_movement_type"]
+          quantity: number
+          unit_cost: number
+          reference_type: string | null
+          reference_id: string | null
+          notes: string | null
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          product_id: string
+          type: Database["public"]["Enums"]["inventory_movement_type"]
+          quantity: number
+          unit_cost?: number
+          reference_type?: string | null
+          reference_id?: string | null
+          notes?: string | null
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          product_id?: string
+          type?: Database["public"]["Enums"]["inventory_movement_type"]
+          quantity?: number
+          unit_cost?: number
+          reference_type?: string | null
+          reference_id?: string | null
+          notes?: string | null
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_movements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          id: string
+          name: string
+          sku: string | null
+          description: string | null
+          category: string | null
+          cost_price: number
+          sell_price: number
+          current_stock: number
+          min_stock: number
+          unit: string
+          image_url: string | null
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          sku?: string | null
+          description?: string | null
+          category?: string | null
+          cost_price?: number
+          sell_price?: number
+          current_stock?: number
+          min_stock?: number
+          unit?: string
+          image_url?: string | null
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          sku?: string | null
+          description?: string | null
+          category?: string | null
+          cost_price?: number
+          sell_price?: number
+          current_stock?: number
+          min_stock?: number
+          unit?: string
+          image_url?: string | null
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -282,7 +556,6 @@ export type Database = {
           id: string
           sender_id: string | null
           sender_type: Database["public"]["Enums"]["message_sender_type"]
-          tenant_id: string
         }
         Insert: {
           content: string
@@ -291,7 +564,6 @@ export type Database = {
           id?: string
           sender_id?: string | null
           sender_type?: Database["public"]["Enums"]["message_sender_type"]
-          tenant_id: string
         }
         Update: {
           content?: string
@@ -300,7 +572,6 @@ export type Database = {
           id?: string
           sender_id?: string | null
           sender_type?: Database["public"]["Enums"]["message_sender_type"]
-          tenant_id?: string
         }
         Relationships: [
           {
@@ -325,7 +596,6 @@ export type Database = {
           id: string
           message: string | null
           read: boolean | null
-          tenant_id: string
           title: string
           user_id: string
         }
@@ -334,7 +604,6 @@ export type Database = {
           id?: string
           message?: string | null
           read?: boolean | null
-          tenant_id: string
           title: string
           user_id: string
         }
@@ -343,7 +612,6 @@ export type Database = {
           id?: string
           message?: string | null
           read?: boolean | null
-          tenant_id?: string
           title?: string
           user_id?: string
         }
@@ -366,7 +634,6 @@ export type Database = {
           delay_hours: number
           id: string
           message_template: string | null
-          tenant_id: string
           webhook_url: string | null
         }
         Insert: {
@@ -377,7 +644,6 @@ export type Database = {
           delay_hours?: number
           id?: string
           message_template?: string | null
-          tenant_id: string
           webhook_url?: string | null
         }
         Update: {
@@ -388,7 +654,6 @@ export type Database = {
           delay_hours?: number
           id?: string
           message_template?: string | null
-          tenant_id?: string
           webhook_url?: string | null
         }
         Relationships: [
@@ -413,7 +678,6 @@ export type Database = {
           score: number | null
           sent_at: string | null
           status: Database["public"]["Enums"]["nps_status"]
-          tenant_id: string
           triggered_by: Database["public"]["Enums"]["nps_trigger"]
           unique_token: string
         }
@@ -428,7 +692,6 @@ export type Database = {
           score?: number | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["nps_status"]
-          tenant_id: string
           triggered_by?: Database["public"]["Enums"]["nps_trigger"]
           unique_token?: string
         }
@@ -443,7 +706,6 @@ export type Database = {
           score?: number | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["nps_status"]
-          tenant_id?: string
           triggered_by?: Database["public"]["Enums"]["nps_trigger"]
           unique_token?: string
         }
@@ -475,7 +737,6 @@ export type Database = {
           probability: number | null
           responsible_id: string | null
           stage: Database["public"]["Enums"]["pipeline_stage"]
-          tenant_id: string
           title: string
           updated_at: string
         }
@@ -489,7 +750,6 @@ export type Database = {
           probability?: number | null
           responsible_id?: string | null
           stage?: Database["public"]["Enums"]["pipeline_stage"]
-          tenant_id: string
           title: string
           updated_at?: string
         }
@@ -503,7 +763,6 @@ export type Database = {
           probability?: number | null
           responsible_id?: string | null
           stage?: Database["public"]["Enums"]["pipeline_stage"]
-          tenant_id?: string
           title?: string
           updated_at?: string
         }
@@ -531,7 +790,6 @@ export type Database = {
           email: string
           id: string
           name: string
-          tenant_id: string
           user_id: string
         }
         Insert: {
@@ -540,7 +798,6 @@ export type Database = {
           email: string
           id?: string
           name: string
-          tenant_id: string
           user_id: string
         }
         Update: {
@@ -549,7 +806,6 @@ export type Database = {
           email?: string
           id?: string
           name?: string
-          tenant_id?: string
           user_id?: string
         }
         Relationships: [
@@ -573,7 +829,6 @@ export type Database = {
           scheduled_for: string
           sent_at: string | null
           status: Database["public"]["Enums"]["execution_status"]
-          tenant_id: string
         }
         Insert: {
           created_at?: string
@@ -585,7 +840,6 @@ export type Database = {
           scheduled_for: string
           sent_at?: string | null
           status?: Database["public"]["Enums"]["execution_status"]
-          tenant_id: string
         }
         Update: {
           created_at?: string
@@ -597,7 +851,6 @@ export type Database = {
           scheduled_for?: string
           sent_at?: string | null
           status?: Database["public"]["Enums"]["execution_status"]
-          tenant_id?: string
         }
         Relationships: [
           {
@@ -632,7 +885,6 @@ export type Database = {
           id: string
           message_template: string
           name: string
-          tenant_id: string
           trigger_event: Database["public"]["Enums"]["rule_trigger_event"]
         }
         Insert: {
@@ -643,7 +895,6 @@ export type Database = {
           id?: string
           message_template?: string
           name: string
-          tenant_id: string
           trigger_event?: Database["public"]["Enums"]["rule_trigger_event"]
         }
         Update: {
@@ -654,7 +905,6 @@ export type Database = {
           id?: string
           message_template?: string
           name?: string
-          tenant_id?: string
           trigger_event?: Database["public"]["Enums"]["rule_trigger_event"]
         }
         Relationships: [
@@ -676,7 +926,6 @@ export type Database = {
           payment_method: Database["public"]["Enums"]["payment_method"]
           sold_at: string
           status: Database["public"]["Enums"]["sale_status"]
-          tenant_id: string
           user_id: string
           value: number
         }
@@ -688,7 +937,6 @@ export type Database = {
           payment_method?: Database["public"]["Enums"]["payment_method"]
           sold_at?: string
           status?: Database["public"]["Enums"]["sale_status"]
-          tenant_id: string
           user_id: string
           value?: number
         }
@@ -700,7 +948,6 @@ export type Database = {
           payment_method?: Database["public"]["Enums"]["payment_method"]
           sold_at?: string
           status?: Database["public"]["Enums"]["sale_status"]
-          tenant_id?: string
           user_id?: string
           value?: number
         }
@@ -730,7 +977,6 @@ export type Database = {
           message_template: string | null
           name: string
           segment_tags: string[] | null
-          tenant_id: string
         }
         Insert: {
           active?: boolean
@@ -740,7 +986,6 @@ export type Database = {
           message_template?: string | null
           name: string
           segment_tags?: string[] | null
-          tenant_id: string
         }
         Update: {
           active?: boolean
@@ -750,7 +995,6 @@ export type Database = {
           message_template?: string | null
           name?: string
           segment_tags?: string[] | null
-          tenant_id?: string
         }
         Relationships: [
           {
@@ -772,7 +1016,6 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           responsible_id: string | null
           status: Database["public"]["Enums"]["task_status"]
-          tenant_id: string
           title: string
           updated_at: string
         }
@@ -785,7 +1028,6 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
-          tenant_id: string
           title: string
           updated_at?: string
         }
@@ -798,7 +1040,6 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           responsible_id?: string | null
           status?: Database["public"]["Enums"]["task_status"]
-          tenant_id?: string
           title?: string
           updated_at?: string
         }
@@ -853,19 +1094,16 @@ export type Database = {
         Row: {
           id: string
           role: Database["public"]["Enums"]["app_role"]
-          tenant_id: string
           user_id: string
         }
         Insert: {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
-          tenant_id: string
           user_id: string
         }
         Update: {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
-          tenant_id?: string
           user_id?: string
         }
         Relationships: [
@@ -873,6 +1111,44 @@ export type Database = {
             foreignKeyName: "user_roles_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_instances: {
+        Row: {
+          id: string
+          api_url: string
+          api_token: string
+          instance_name: string
+          status: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          api_url: string
+          api_token: string
+          instance_name: string
+          status?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          api_url?: string
+          api_token?: string
+          instance_name?: string
+          status?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_instances_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
             referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
@@ -901,6 +1177,7 @@ export type Database = {
         | "finalizada"
       execution_status: "scheduled" | "sent" | "failed" | "cancelled"
       goal_period_type: "daily" | "weekly" | "monthly"
+      inventory_movement_type: "entrada" | "saida" | "ajuste"
       lead_origin:
         | "whatsapp"
         | "instagram"
@@ -1080,6 +1357,7 @@ export const Constants = {
       ],
       execution_status: ["scheduled", "sent", "failed", "cancelled"],
       goal_period_type: ["daily", "weekly", "monthly"],
+      inventory_movement_type: ["entrada", "saida", "ajuste"],
       lead_origin: [
         "whatsapp",
         "instagram",

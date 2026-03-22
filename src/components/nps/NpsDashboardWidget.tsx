@@ -5,24 +5,22 @@ import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export function NpsDashboardWidget() {
-  const { tenantId } = useAuth();
-  const navigate = useNavigate();
+    const navigate = useNavigate();
   const [nps, setNps] = useState<number | null>(null);
   const [prevNps, setPrevNps] = useState<number | null>(null);
   const [recentDetractors, setRecentDetractors] = useState(0);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const fetch = async () => {
+        const fetch = async () => {
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString();
       const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000).toISOString();
       const threeDaysAgo = new Date(now.getTime() - 3 * 86400000).toISOString();
 
       const [currentRes, prevRes, detRes] = await Promise.all([
-        supabase.from("nps_surveys").select("score, category").eq("tenant_id", tenantId).eq("status", "responded").gte("responded_at", thirtyDaysAgo),
-        supabase.from("nps_surveys").select("score, category").eq("tenant_id", tenantId).eq("status", "responded").gte("responded_at", sixtyDaysAgo).lt("responded_at", thirtyDaysAgo),
-        supabase.from("nps_surveys").select("id", { count: "exact" }).eq("tenant_id", tenantId).eq("category", "detrator").gte("responded_at", threeDaysAgo),
+        supabase.from("nps_surveys").select("score, category").eq("status", "responded").gte("responded_at", thirtyDaysAgo),
+        supabase.from("nps_surveys").select("score, category").eq("status", "responded").gte("responded_at", sixtyDaysAgo).lt("responded_at", thirtyDaysAgo),
+        supabase.from("nps_surveys").select("id", { count: "exact" }).eq("category", "detrator").gte("responded_at", threeDaysAgo),
       ]);
 
       const calcNps = (data: any[]) => {

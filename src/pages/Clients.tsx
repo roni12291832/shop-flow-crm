@@ -26,6 +26,7 @@ interface Client {
   id: string; name: string; phone: string | null; email: string | null;
   city: string | null; origin: string | null; tags: string[] | null;
   ticket_medio: number | null; created_at: string;
+  score: number | null; temperature: string | null;
 }
 
 interface ImportRow {
@@ -33,8 +34,7 @@ interface ImportRow {
 }
 
 export default function Clients() {
-  const { tenantId } = useAuth();
-  const [clients, setClients] = useState<Client[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -46,8 +46,7 @@ export default function Clients() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchClients = async () => {
-    if (!tenantId) return;
-    const { data } = await supabase.from("clients").select("id, name, phone, email, city, origin, tags, ticket_medio, created_at").eq("tenant_id", tenantId).order("created_at", { ascending: false });
+        const { data } = await supabase.from("clients").select("id, name, phone, email, city, origin, tags, ticket_medio, score, temperature, created_at").order("created_at", { ascending: false });
     if (data) setClients(data as Client[]);
   };
 
@@ -55,9 +54,8 @@ export default function Clients() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId) return;
-    const { error } = await supabase.from("clients").insert({
-      tenant_id: tenantId, name: form.name, phone: form.phone || null,
+        const { error } = await supabase.from("clients").insert({
+       name: form.name, phone: form.phone || null,
       email: form.email || null, city: form.city || null, origin: form.origin as any, notes: form.notes || null,
     });
     if (error) toast.error("Erro ao criar cliente");
@@ -114,8 +112,7 @@ export default function Clients() {
 
     const validOrigins = ORIGINS.map(o => o.value);
     const toInsert = importData.map(r => ({
-      tenant_id: tenantId,
-      name: r.name,
+            name: r.name,
       phone: r.phone || null,
       email: r.email || null,
       city: r.city || null,
@@ -264,7 +261,7 @@ export default function Clients() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Cliente", "Telefone", "Cidade", "Origem", "Tags", "Ticket Médio", "Ações"].map(h => (
+                {["Cliente", "Telefone", "Origem", "Temperatura", "Score", "Tags", "Ticket Médio", "Ações"].map(h => (
                   <th key={h} className="px-5 py-3.5 text-left text-muted-foreground text-[12px] font-semibold uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -281,12 +278,19 @@ export default function Clients() {
                     </div>
                   </td>
                   <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.phone || "—"}</td>
-                  <td className="px-5 py-3.5 text-muted-foreground text-[13px]">{c.city || "—"}</td>
                   <td className="px-5 py-3.5">
                     <Badge variant="secondary" className="text-[12px] bg-primary/20 text-primary border-0">
                       {ORIGINS.find(o => o.value === c.origin)?.label || c.origin || "—"}
                     </Badge>
                   </td>
+                  <td className="px-5 py-3.5">
+                    <span className="flex items-center gap-1 text-[13px] font-medium">
+                      {c.temperature === "quente" && <span className="text-destructive">🔥 Quente</span>}
+                      {c.temperature === "morno" && <span className="text-warning">🌤️ Morno</span>}
+                      {(c.temperature === "frio" || !c.temperature) && <span className="text-muted-foreground">❄️ Frio</span>}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5 text-foreground font-bold text-sm">{c.score || 0} pts</td>
                   <td className="px-5 py-3.5">
                     <div className="flex gap-1.5">
                       {(c.tags || []).map(tag => (

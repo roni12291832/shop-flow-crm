@@ -16,7 +16,7 @@ interface SellerRanking {
 }
 
 export default function Goals() {
-  const { tenantId, user, hasRole } = useAuth();
+  const {  user, hasRole } = useAuth();
   const navigate = useNavigate();
   const isAdmin = hasRole("admin");
   const isGerente = hasRole("gerente");
@@ -33,8 +33,7 @@ export default function Goals() {
   const [monthlyHistory, setMonthlyHistory] = useState<{ month: string; realized: number; target: number }[]>([]);
 
   const fetchData = useCallback(async () => {
-    if (!tenantId) return;
-
+    
     const monthStart = startOfMonth(selectedMonth);
     const monthEnd = endOfMonth(selectedMonth);
     const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
@@ -43,7 +42,7 @@ export default function Goals() {
     // Fetch sales for selected month + previous month
     const { data: allSales } = await supabase.from("sales_entries")
       .select("value, sold_at, user_id, status")
-      .eq("tenant_id", tenantId)
+      
       .eq("status", "confirmado")
       .gte("sold_at", prevMonthStart.toISOString())
       .lte("sold_at", monthEnd.toISOString());
@@ -88,7 +87,7 @@ export default function Goals() {
     const monthEndStr = monthEnd.toISOString().split("T")[0];
 
     const { data: goals } = await supabase.from("goals")
-      .select("*").eq("tenant_id", tenantId);
+      .select("*");
 
     const goalsArr = goals || [];
     const monthlyGoal = goalsArr.find((g: any) => g.period_type === "monthly" && !g.user_id && g.start_date <= monthEndStr && g.end_date >= monthStartStr);
@@ -98,7 +97,7 @@ export default function Goals() {
     setWeekGoal(weeklyGoal ? Number(weeklyGoal.target_value) : 0);
 
     // Seller ranking for selected month
-    const { data: profiles } = await supabase.from("profiles").select("user_id, name").eq("tenant_id", tenantId);
+    const { data: profiles } = await supabase.from("profiles").select("user_id, name");
     const sellerGoals = goalsArr.filter((g: any) => g.user_id && g.period_type === "monthly" && g.start_date <= monthEndStr && g.end_date >= monthStartStr);
 
     const monthSalesArr = sales.filter(s => {
@@ -121,7 +120,7 @@ export default function Goals() {
     // Monthly history (last 6 months)
     const { data: allHistSales } = await supabase.from("sales_entries")
       .select("value, sold_at, status")
-      .eq("tenant_id", tenantId)
+      
       .eq("status", "confirmado")
       .gte("sold_at", subMonths(monthStart, 5).toISOString());
 
@@ -147,8 +146,7 @@ export default function Goals() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
-    if (!tenantId) return;
-    const channel = supabase
+        const channel = supabase
       .channel("sales-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "sales_entries" }, () => fetchData())
       .subscribe();
