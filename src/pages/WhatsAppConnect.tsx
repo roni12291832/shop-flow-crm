@@ -128,12 +128,12 @@ export default function WhatsAppConnect() {
         "Content-Type": "application/json",
       };
 
-      // Attempt to create/connect using the official V2 endpoint /instance/init
+      // --- STEP 1: INITIALIZE INSTANCE ---
       const createRes = await fetch(`${apiUrl}/instance/init`, {
         method: "POST",
         headers: {
           ...headers,
-          "admintoken": apiToken // Docs say admintoken is needed for creating an instance
+          "admintoken": apiToken
         },
         body: JSON.stringify({ name: instanceName }),
       });
@@ -142,63 +142,75 @@ export default function WhatsAppConnect() {
         throw new Error("Token da API inválido (Verifique o admintoken no painel)");
       }
 
-      if (!createRes.ok && createRes.status !== 409) { // 409 usually means already exists
-        throw new Error(`Erro ${createRes.status} no servidor da API ao criar conexão`);
+      let createData: any = {};
+      if (createRes.ok) {
+        createData = await createRes.json().catch(() => ({}));
+        console.log("Instância Criada/Iniciada:", createData);
+      } else if (createRes.status !== 409 && createRes.status !== 400) {
+        throw new Error(`Erro ${createRes.status} no servidor ao criar conexão`);
       }
 
-      const createData = await createRes.json().catch(() => ({}));
-      console.log("Resposta do servidor API (/instance/init):", createData);
-      
-      // Attempt to set webhook (Non-fatal if it fails)
-      const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
+      // Tenta achar o token da instância (padrão v2 UAZAPI)
+      // Pode vir em createData.instance.token, createData.hash.token, ou ser a propria global apikey
+      const instanceToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
+
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // --- STEP 2: CONNECT INSTANCE & GET QR CODE ---
+      let connectData = null;
+
+      // Faz a chamada oficial V2 POST /instance/connect
       try {
-        await fetch(`${apiUrl}/webhook/set`, {
-          method: "POST",
+        const res = await fetch(`${apiUrl}/instance/connect`, { 
+          method: "POST", 
           headers: {
-            ...headers,
-            "apikey": createData?.hash || apiToken // some APIs use the returned hash as apikey for config
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "token": instanceToken,
+            "admintoken": apiToken,
+            "apikey": apiToken
           },
-          body: JSON.stringify({
-            instanceName: instanceName,
-            enabled: true,
-            url: webhookUrl,
-            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"]
-          }),
+          body: JSON.stringify({}) // Sem o campo phone, gera o QR Code
         });
-      } catch (e) {
-        console.warn("Aviso: Configuração do Webhook falhou, mas continuando...", e);
-      }
-
-      // Check if the QR code is in the response of /instance/init
-      if (createData?.base64 || createData?.qrcode?.base64 || createData?.qrcode) {
-        processQrData(createData);
-      } else {
-        // Fallback: wait a bit and explicitly call a generic connect/QR endpoint
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        let connectData = null;
-        try {
-          // V2 uses POST /instance/connect with body { name }
-          const res = await fetch(`${apiUrl}/instance/connect`, { 
-            method: "POST", 
-            headers: {
-              ...headers,
-              "apikey": apiToken,
-              "Authorization": `Bearer ${apiToken}`
-            },
-            body: JSON.stringify({ name: instanceName })
-          });
-          if (res.ok) connectData = await res.json();
-        } catch(e) {}
-
-        if (!connectData) {
-          try {
-            // Fallback for V1 style
-            const getRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "GET", headers });
-            if (getRes.ok) connectData = await getRes.json();
-          } catch(e) {}
+        if (res.ok) {
+          connectData = await res.json();
+          console.log("Connect Data (POST /instance/connect):", connectData);
         }
-        processQrData(connectData || createData);
+      } catch(e) {
+        console.log("Falha no POST /instance/connect", e);
       }
+
+      // Se falhar ou não trouxer QR, tenta o V2 GET /instance/status
+      if (!connectData?.base64 && !connectData?.qrcode) {
+        try {
+          const statusRes = await fetch(`${apiUrl}/instance/status`, {
+            method: "GET",
+            headers: {
+              "Accept": "application/json",
+              "token": instanceToken,
+              "admintoken": apiToken,
+              "apikey": apiToken
+            }
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            console.log("Status Data (GET /instance/status):", statusData);
+            if (statusData?.base64 || statusData?.qrcode) {
+              connectData = statusData;
+            }
+          }
+        } catch(e) {}
+      }
+
+      // Se todas as rotas V2 puras falharem, tenta as rotas mistas/antigas
+      if (!connectData?.base64 && !connectData?.qrcode) {
+        try {
+          const fallbackRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "GET", headers: { ...headers, "apikey": apiToken, "admintoken": apiToken, "token": instanceToken }});
+          if (fallbackRes.ok) connectData = await fallbackRes.json();
+        } catch (e) {}
+      }
+
+      processQrData(connectData || createData);
       
       function processQrData(data: any) {
         if (!data) {
