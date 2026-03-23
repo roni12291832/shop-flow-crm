@@ -204,13 +204,22 @@ export default function WhatsAppConnect() {
 
       const hasQr = (d: any) => d?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
 
-      // Se a resposta imediata não trouxer o QR Code (normal, pois a Engine demora a ligar), inicia o Polling
-      let maxAttempts = 15; // 15 tentativas x 2 segundos = 30 segundos
+      // Se a resposta imediata trouxer o QR Code, já exibe na tela
       let foundQr = hasQr(connectData);
+      if (foundQr) {
+        addLog(`[Polling] QR Code encontrado instantaneamente no passo 2!`);
+        const qrString = connectData?.base64 || connectData?.qrcode?.base64 || connectData?.qrcode || connectData?.instance?.qrcode || connectData?.instance?.base64;
+        setQrCode(qrString);
+        toast.success("QR Code gerado! Escaneie com o WhatsApp");
+      }
 
-      if (foundQr) addLog(`[Polling] QR Code encontrado instantaneamente no passo 2!`);
+      let maxAttempts = 60; // 60 tentativas x 2 segundos = 120 segundos (~2 minutos para scannear)
+      let isConnected = connectData?.instance?.status === "connected" || connectData?.status === "connected" || connectData?.state === "connected" || connectData?.connected;
 
-      while (!foundQr && maxAttempts > 0) {
+      addLog(`[Polling] Iniciando monitoramento da conexão (Até 120s)...`);
+
+      // Fica verificando o status da conexão até que a pessoa escaneie e conecte (ou dê timeout)
+      while (!isConnected && maxAttempts > 0) {
         addLog(`[Polling] Aguardando 2s (Tentativas restantes: ${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, 2000));
         maxAttempts--;
@@ -230,14 +239,21 @@ export default function WhatsAppConnect() {
           if (statusRes.ok) {
             try {
               const statusData = JSON.parse(textRes);
-              if (hasQr(statusData)) {
-                connectData = statusData;
-                foundQr = true;
-                addLog(`[Polling] QR Code recebido com sucesso!`);
-              } else if (statusData?.instance?.status === "connected" || statusData?.status === "connected") {
+              
+              if (statusData?.instance?.status === "connected" || statusData?.status === "connected" || statusData?.state === "connected" || statusData?.connected) {
                  connectData = statusData;
-                 addLog(`[Polling] Status consta como 'connected', ignorando QR code.`);
-                 break; // Está conectado, não precisa esperar o QR
+                 isConnected = true;
+                 addLog(`[Polling] Status consta como 'connected', whatsapp conectado com SUCESSO!`);
+                 break;
+                 
+              } else if (!foundQr && hasQr(statusData)) {
+                // Se ainda não tínhamos o QR e ele apareceu agora, mostra na tela
+                foundQr = true;
+                connectData = statusData;
+                const qrString = statusData?.base64 || statusData?.qrcode?.base64 || statusData?.qrcode || statusData?.instance?.qrcode || statusData?.instance?.base64;
+                setQrCode(qrString);
+                toast.success("QR Code gerado! Escaneie com o WhatsApp");
+                addLog(`[Polling] QR Code recebido com sucesso no polling!`);
               }
             } catch(e) {}
           }
@@ -246,31 +262,15 @@ export default function WhatsAppConnect() {
         }
       }
 
-      processQrData(connectData || createData);
-      
-      function processQrData(data: any) {
-        if (!data) {
-           addLog(`[ProcessQR] Nenhum dado de QR Code recebido.`);
-           toast.error("Não recebemos dados do QR Code");
-           updateStatusInDb("disconnected");
-           return;
-        }
-        
-        const qrString = data?.base64 || data?.qrcode?.base64 || data?.qrcode || data?.instance?.qrcode || data?.instance?.base64;
-        
-        if (qrString) {
-          addLog(`[ProcessQR] Sucesso. Tamanho do QR: ${qrString.length} chars`);
-          setQrCode(qrString);
-          toast.success("QR Code gerado! Escaneie com o WhatsApp");
-        } else if (data?.connected || data?.instance?.status === "connected" || data?.status === "connected" || data?.state === "connected") {
-          addLog(`[ProcessQR] Instância já conectada!`);
-          updateStatusInDb("connected");
-          toast.success("WhatsApp já está conectado!");
-        } else {
-          addLog(`[ProcessQR] QR Code não encontrado nos dados finais.`);
-          toast.error("Demorou muito para gerar o QR Code. Veja os logs.");
-          updateStatusInDb("disconnected");
-        }
+      if (isConnected) {
+        addLog(`[ProcessQR] Instância conectada!`);
+        updateStatusInDb("connected");
+        setQrCode(null);
+        toast.success("WhatsApp conectado com sucesso!");
+      } else {
+        addLog(`[ProcessQR] Tempo esgotado para escanear o QR Code.`);
+        updateStatusInDb("disconnected");
+        toast.error("Tempo esgotado para conectar. Tente gerar novamente.");
       }
       
     } catch (err: any) {
