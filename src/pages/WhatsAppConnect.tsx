@@ -170,7 +170,7 @@ export default function WhatsAppConnect() {
             "admintoken": apiToken,
             "apikey": apiToken
           },
-          body: JSON.stringify({}) // Sem o campo phone, gera o QR Code
+          body: JSON.stringify({ "base64": true })
         });
         if (res.ok) {
           connectData = await res.json();
@@ -181,7 +181,9 @@ export default function WhatsAppConnect() {
       }
 
       // Se falhar ou não trouxer QR, tenta o V2 GET /instance/status
-      if (!connectData?.base64 && !connectData?.qrcode) {
+      const hasQr = (d: any) => d?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
+
+      if (!hasQr(connectData)) {
         try {
           const statusRes = await fetch(`${apiUrl}/instance/status`, {
             method: "GET",
@@ -195,7 +197,7 @@ export default function WhatsAppConnect() {
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             console.log("Status Data (GET /instance/status):", statusData);
-            if (statusData?.base64 || statusData?.qrcode) {
+            if (hasQr(statusData)) {
               connectData = statusData;
             }
           }
@@ -203,7 +205,7 @@ export default function WhatsAppConnect() {
       }
 
       // Se todas as rotas V2 puras falharem, tenta as rotas mistas/antigas
-      if (!connectData?.base64 && !connectData?.qrcode) {
+      if (!hasQr(connectData)) {
         try {
           const fallbackRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "GET", headers: { ...headers, "apikey": apiToken, "admintoken": apiToken, "token": instanceToken }});
           if (fallbackRes.ok) connectData = await fallbackRes.json();
@@ -218,14 +220,17 @@ export default function WhatsAppConnect() {
            updateStatusInDb("disconnected");
            return;
         }
-        if (data?.base64 || data?.qrcode?.base64 || data?.qrcode) {
-          setQrCode(data.base64 || data?.qrcode?.base64 || data.qrcode);
+        
+        const qrString = data?.base64 || data?.qrcode?.base64 || data?.qrcode || data?.instance?.qrcode || data?.instance?.base64;
+        
+        if (qrString) {
+          setQrCode(qrString);
           toast.success("QR Code gerado! Escaneie com o WhatsApp");
-        } else if (data?.instance?.state === "open" || data?.connected) {
+        } else if (data?.instance?.state === "open" || data?.connected || data?.instance?.status === "connected") {
           updateStatusInDb("connected");
           toast.success("WhatsApp já está conectado!");
         } else {
-          toast.error("Não foi possível gerar o QR Code");
+          toast.error("Não foi possível gerar o QR Code (veja o console)");
           updateStatusInDb("disconnected");
         }
       }
