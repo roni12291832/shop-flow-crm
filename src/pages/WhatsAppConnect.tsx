@@ -177,20 +177,23 @@ export default function WhatsAppConnect() {
         await new Promise(resolve => setTimeout(resolve, 1500));
         let connectData = null;
         try {
-          const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { 
-            method: "GET", // Evolution V2 usually uses GET for connect
+          // V2 uses POST /instance/connect with body { name }
+          const res = await fetch(`${apiUrl}/instance/connect`, { 
+            method: "POST", 
             headers: {
               ...headers,
               "apikey": apiToken,
               "Authorization": `Bearer ${apiToken}`
-            } 
+            },
+            body: JSON.stringify({ name: instanceName })
           });
           if (res.ok) connectData = await res.json();
         } catch(e) {}
 
         if (!connectData) {
           try {
-            const getRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "POST", headers });
+            // Fallback for V1 style
+            const getRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "GET", headers });
             if (getRes.ok) connectData = await getRes.json();
           } catch(e) {}
         }
