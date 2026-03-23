@@ -21,7 +21,7 @@ export default function Ranking() {
       ]);
       const stats: SellerStats[] = (profiles || []).map((p) => {
         const userOpps = (opps || []).filter((o) => o.responsible_id === p.user_id);
-        const closed = userOpps.filter((o) => o.stage === "venda_fechada");
+        const closed = userOpps.filter((o) => o.stage === "comprador");
         const totalRevenue = closed.reduce((s, o) => s + Number(o.estimated_value || 0), 0);
         const conv = userOpps.length > 0 ? (closed.length / userOpps.length) * 100 : 0;
         const completedTasks = (tasks || []).filter((t) => t.responsible_id === p.user_id).length;
@@ -30,7 +30,7 @@ export default function Ranking() {
           user_id: p.user_id, name: p.name, points, closedDeals: closed.length,
           totalRevenue, conversionRate: Math.round(conv),
           avatar: p.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
-          leadsResponded: userOpps.length * 3 + 8, followUps: userOpps.length * 2 + 4,
+          leadsResponded: userOpps.length, followUps: completedTasks,
         };
       });
       stats.sort((a, b) => b.points - a.points);

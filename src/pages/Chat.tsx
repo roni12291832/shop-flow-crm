@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Bot, Send, Plus } from "lucide-react";
+import { Search, Bot, Send, Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -186,10 +186,11 @@ export default function Chat() {
     if (activeClient && wpConfig && wpConfig.status === "connected") {
       try {
         if (aiMode) {
-          // Future phase: Call AI Edge Function directly instead of Webhook
           toast.info("A IA assumirá a resposta em breve (Funct. não atrelada ainda)");
         } else {
-          // Direct API call to UZAPI / Evolution
+          const phoneDigits = activeClient.phone?.replace(/\D/g, "") || "";
+          const formattedPhone = phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
+
           const res = await fetch(`${wpConfig.api_url}/message/sendText/${wpConfig.instance_name}`, {
             method: "POST",
             headers: {
@@ -197,14 +198,14 @@ export default function Chat() {
               "apikey": wpConfig.api_token
             },
             body: JSON.stringify({
-              number: `${activeClient.phone}@s.whatsapp.net`,
+              number: `${formattedPhone}@s.whatsapp.net`,
               text: content
             })
           });
           
           if (!res.ok) {
             console.error("Failed to send to UZAPI", await res.text());
-            toast.error("Erro ao enviar mensagem para a API do WhatsApp");
+            toast.error("Erro ao enviar mensagem para a API do WhatsApp (Verifique o log)");
           }
         }
       } catch (e) {
@@ -257,6 +258,21 @@ export default function Chat() {
         toast.success("Oportunidade criada no CRM!");
         setClientOpp(data);
       }
+    }
+  };
+
+  const deleteConversation = async () => {
+    if (!activeConvId) return;
+    if (confirm("Tem certeza que deseja apagar essa conversa?")) {
+      await supabase.from("messages").delete().eq("conversation_id", activeConvId);
+      const { error } = await supabase.from("conversations").delete().eq("id", activeConvId);
+      if (error) {
+        toast.error("Erro ao apagar conversa.");
+        return;
+      }
+      setActiveConvId(null);
+      fetchConversations();
+      toast.success("Conversa apagada");
     }
   };
 
@@ -340,6 +356,9 @@ export default function Chat() {
               <div className="text-muted-foreground text-[12px]">{activeConv.status?.replace("_", " ")}</div>
             </div>
             <div className="flex gap-2">
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={deleteConversation} title="Apagar Conversa">
+                <Trash2 className="h-4 w-4" />
+              </Button>
               <Button variant={aiMode ? "default" : "outline"} size="sm" className="gap-1.5 text-[12px]" onClick={() => setAiMode(!aiMode)}>
                 <Bot className="h-4 w-4" /> {aiMode ? "IA Ativa" : "Ativar IA"}
               </Button>

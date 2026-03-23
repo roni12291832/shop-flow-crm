@@ -149,6 +149,22 @@ export default function Pipeline() {
     toast.success(`Mensagens enviadas para ${successCount} leads!`);
   };
 
+  const handleDragStart = (e: React.DragEvent, oppId: string) => {
+    e.dataTransfer.setData("oppId", oppId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent, newStage: string) => {
+    e.preventDefault();
+    const oppId = e.dataTransfer.getData("oppId");
+    if (oppId) {
+      moveStage(oppId, newStage);
+    }
+  };
+
   return (
     <div className="p-7 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -177,7 +193,7 @@ export default function Pipeline() {
           const stageOpps = opportunities.filter((o) => o.stage === stage.value);
           const stageTotal = stageOpps.reduce((s, o) => s + Number(o.estimated_value || 0), 0);
           return (
-            <div key={stage.value} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex flex-col bg-card border border-border rounded-[14px] p-4" style={{ height: "calc(100vh - 180px)", borderTop: `3px solid ${stage.color}` }}>
+            <div key={stage.value} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, stage.value)} className="min-w-[220px] max-w-[280px] flex-shrink-0 flex flex-col bg-card border border-border rounded-[14px] p-4" style={{ height: "calc(100vh - 180px)", borderTop: `3px solid ${stage.color}` }}>
               <div className="flex justify-between items-center mb-1">
                 <span className="text-foreground font-bold text-[13px]">{stage.label}</span>
                 <div className="flex items-center gap-1.5">
@@ -191,7 +207,7 @@ export default function Pipeline() {
               
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                 {stageOpps.map((opp) => (
-                  <div key={opp.id} className="bg-background border border-border rounded-[10px] p-3 shadow-sm cursor-pointer hover:border-primary/30 transition-colors" onClick={() => openEdit(opp)}>
+                  <div key={opp.id} draggable onDragStart={(e) => handleDragStart(e, opp.id)} className="bg-background border border-border rounded-[10px] p-3 shadow-sm cursor-grab active:cursor-grabbing hover:border-primary/30 transition-colors" onClick={() => openEdit(opp)}>
                     <div className="text-foreground text-[12px] font-semibold mb-1">{opp.title}</div>
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-muted-foreground text-[11px] truncate flex-1 pr-2">{opp.client_name}</span>
