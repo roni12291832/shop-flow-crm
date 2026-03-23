@@ -63,7 +63,11 @@ export function RuleCard({ rule, executionCount, onToggle, onEdit, onDuplicate, 
             </span>
           </div>
 
-          <p className="text-xs text-muted-foreground line-clamp-2">{rule.message_template}</p>
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {rule.message_template.includes("|||") 
+              ? `[${rule.message_template.split("|||").filter(m => m.trim()).length} Variações] ${rule.message_template.split("|||")[0]}...`
+              : rule.message_template}
+          </p>
 
           <div className="mt-2">
             <Badge variant="secondary" className="text-xs">

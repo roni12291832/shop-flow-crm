@@ -147,6 +147,17 @@ async def jarvis_ask(request: dict):
     return {"answer": answer, "response": answer} # Retorna nos dois formatos para compatibilidade
 
 
+@app.post("/jarvis/variations")
+async def jarvis_variations(request: dict):
+    """Gera 15 variações de uma mensagem para a régua."""
+    base_message = request.get("message", "")
+    if not base_message:
+        return {"error": "Envie a mensagem base no campo 'message'"}
+    
+    variations = await jarvis.generate_message_variations(base_message)
+    return {"variations": variations}
+
+
 @app.post("/jarvis/report")
 async def jarvis_report_now():
     """Força a geração e envio do relatório diário agora (manual)."""

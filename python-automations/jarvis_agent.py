@@ -182,6 +182,29 @@ Responda APENAS "SIM" se for interesse, ou "NAO" caso contrário (por exemplo: u
         )
         return "SIM" in response.choices[0].message.content.strip().upper()
 
+    async def generate_message_variations(self, base_message: str, count: int = 15) -> str:
+        """Gera variações de uma mensagem para evitar bloqueio no WhatsApp."""
+        messages = [
+            {"role": "system", "content": f"""Você é um especialista em Copywriting para vendas e proteção Anti-Ban de WhatsApp.
+Seu objetivo é gerar exatamente {count} variações extremamente diversificadas de uma mesma mensagem base.
+
+REGRAS CRÍTICAS:
+1. Mantenha o mesmo sentido, mas alterne saudações (Olá, Oi, Tudo bem?, Como vai?), sinônimos, ordem das frases e emojis.
+2. Use as mesmas variáveis que encontrar na base (ex: {{{{nome}}}}, {{{{produto}}}}). NÃO as invente ou mude.
+3. Separe cada variação APENAS pela sequência " ||| " (três barras verticais com espaços).
+4. O resultado deve ser UM ÚNICO TEXTO longo contendo as {count} versões separadas por |||.
+5. Não numere as versões no texto."""},
+            {"role": "user", "content": f"MENSAGEM BASE:\n{base_message}"}
+        ]
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.9,
+            max_tokens=2500,
+        )
+        return response.choices[0].message.content.strip()
+
     # ─── Coletores de Contexto ────────────────────────────────────────────
 
     async def _collect_daily_context(self) -> str:

@@ -54,13 +54,23 @@ async def process_rule(rule: dict, wp_config: dict):
                     eligible_clients.append(c)
 
     elif rule['trigger_event'] == 'no_purchase':
+        # Alvo: Clientes que não compraram há X dias
+        # Se last_purchase existe, usa ele. Se não, usa created_at (lead novo que nunca comprou)
         response = supabase.table('clients').select('*').execute()
         for c in response.data:
             lp = c.get('last_purchase')
+            created = c.get('created_at')
+            
+            reference_date = None
             if lp:
-                lp_date = datetime.fromisoformat(lp.split('T')[0]).date()
-                if lp_date == target_date:
-                    eligible_clients.append(c)
+                reference_date = datetime.fromisoformat(lp.split('T')[0]).date()
+            elif created:
+                reference_date = datetime.fromisoformat(created.split('T')[0]).date()
+            
+            if reference_date == target_date:
+                # Verifica se realmente NÃO tem nenhuma venda registrada (segurança extra)
+                # O ideal seria um count em sales_entries, mas vamos confiar no target_date por enquanto
+                eligible_clients.append(c)
 
     elif rule['trigger_event'] == 'birthday':
         bday_target_date = today + timedelta(days=rule['delay_days'])
@@ -120,8 +130,12 @@ async def process_rule(rule: dict, wp_config: dict):
             if not phone:
                 continue
 
-            msg_template = random.choice(messages_list)
+            # Seleciona uma das 15 variações de forma aleatória par este cliente específico
+            msg_index = random.randint(0, len(messages_list) - 1)
+            msg_template = messages_list[msg_index]
             personalized_msg = uazapi._personalize_message(msg_template, client)
+
+            logger.info(f"📩 Preparando envio para {client['name']} (Variação {msg_index + 1}/{len(messages_list)})")
 
             resp = await uazapi.send_text(
                 api_url=wp_config['api_url'], 
@@ -134,10 +148,10 @@ async def process_rule(rule: dict, wp_config: dict):
             status = 'sucesso'
             if "error" in resp:
                 status = 'falha'
-                results["failed"] += 1
+                results["failed"] = results["failed"] + 1
                 logger.error(f"❌ Erro para {phone}: {resp['error']}")
             else:
-                results["sent"] += 1
+                results["sent"] = results["sent"] + 1
                 
             try:
                 supabase.table('relationship_executions').insert({

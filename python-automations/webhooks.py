@@ -94,16 +94,48 @@ async def receive_whatsapp_message(request: Request):
         is_new = True
         logger.info(f"Novo cliente criado: {push_name} ({phone})")
 
-    # ─── 2. Salva Mensagem ────────────────────────────────────────────
+    # ─── 2. Gerencia Conversa ─────────────────────────────────────────
+    # Busca a última conversa aberta ou em atendimento desse cliente
+    conv_res = db.table("conversations").select("*") \
+                .eq("client_id", client_id) \
+                .in_("status", ["aberta", "em_atendimento", "aguardando"]) \
+                .order("last_message_at", desc=True) \
+                .limit(1).execute()
+                
+    if conv_res.data and len(conv_res.data) > 0:
+        conversation = conv_res.data[0]
+        conversation_id = conversation["id"]
+        # Atualiza o status e a última mensagem da conversa
+        db.table("conversations").update({
+            "last_message": message_text[:100],
+            "last_message_at": datetime.utcnow().isoformat(),
+            "status": "aguardando" if not from_me else "em_atendimento"
+        }).eq("id", conversation_id).execute()
+    else:
+        # Cria nova conversa
+        new_conv = {
+            "client_id": client_id,
+            "status": "aberta",
+            "last_message": message_text[:100],
+            "last_message_at": datetime.utcnow().isoformat(),
+        }
+        insert_conv = db.table("conversations").insert(new_conv).execute()
+        if not insert_conv.data:
+            logger.error(f"Erro ao criar conversa: {insert_conv}")
+            return {"status": "error", "message": "falha ao criar conversa"}
+        conversation_id = insert_conv.data[0]["id"]
+
+    # ─── 3. Salva Mensagem ────────────────────────────────────────────
     msg_payload = {
+        "conversation_id": conversation_id,
         "client_id": client_id,
         "content": message_text,
-        "sender_type": "client",
+        "sender_type": "cliente", # Usando 'cliente' para bater com o que o front espera ou o padrão do banco
         "channel": "whatsapp",
         "is_from_client": True,
     }
     db.table("messages").insert(msg_payload).execute()
-    logger.info(f"Mensagem salva de {push_name}: {message_text[:50]}...")
+    logger.info(f"Mensagem salva na conversa {conversation_id} de {push_name}: {message_text[:50]}...")
 
     # ─── 3. Cria ou Atualiza Oportunidade (Pipeline) ──────────────────
     if is_new:

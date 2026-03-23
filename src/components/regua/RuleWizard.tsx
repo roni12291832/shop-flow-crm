@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Package, Clock, Heart, Hand, MessageSquare, Mail, Smartphone, ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { Package, Clock, Heart, Hand, MessageSquare, Mail, Smartphone, ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface RuleFormData {
@@ -66,12 +66,34 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
     active: initialData?.active ?? true,
   });
 
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const updateForm = (key: keyof RuleFormData, value: any) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const insertVariable = (variable: string) => {
     updateForm("message_template", form.message_template + variable);
+  };
+
+  const handleGenerateVariations = async () => {
+    if (!form.message_template) return;
+    setIsGenerating(true);
+    try {
+      const resp = await fetch(`http://localhost:8000/jarvis/variations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: form.message_template }),
+      });
+      const data = await resp.json();
+      if (data.variations) {
+        updateForm("message_template", data.variations);
+      }
+    } catch (error) {
+      console.error("Erro ao gerar variações:", error);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const previewMessage = () => {
@@ -187,24 +209,50 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
 
             <div>
               <Label className="text-foreground">Mensagem</Label>
-              <div className="flex gap-1.5 mt-1.5 mb-2 flex-wrap">
-                {VARIABLES.map((v) => (
-                  <Badge
-                    key={v.key}
-                    variant="secondary"
-                    className="cursor-pointer hover:bg-primary/20 text-xs"
-                    onClick={() => insertVariable(v.key)}
-                  >
-                    {v.label}
-                  </Badge>
-                ))}
+              <div className="flex items-center justify-between gap-1.5 mt-1.5 mb-2">
+                <div className="flex gap-1.5 flex-wrap">
+                  {VARIABLES.map((v) => (
+                    <Badge
+                      key={v.key}
+                      variant="secondary"
+                      className="cursor-pointer hover:bg-primary/20 text-xs"
+                      onClick={() => insertVariable(v.key)}
+                    >
+                      {v.label}
+                    </Badge>
+                  ))}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[10px] gap-1 bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
+                  onClick={handleGenerateVariations}
+                  disabled={isGenerating || !form.message_template}
+                >
+                  <Sparkles className={cn("h-3 w-3", isGenerating && "animate-spin")} />
+                  {isGenerating ? "Gerando..." : "Gerar 15 variações com Jarvis"}
+                </Button>
               </div>
               <Textarea
-                placeholder="Escreva sua mensagem aqui..."
+                placeholder="Escreva sua mensagem aqui... Use ||| para separar variações."
                 value={form.message_template}
                 onChange={(e) => updateForm("message_template", e.target.value)}
-                rows={4}
+                rows={form.message_template.includes("|||") ? 5 : 4}
+                className="font-mono text-xs"
               />
+              
+              {form.message_template.includes("|||") && (
+                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto border border-border/50 rounded-md p-2 bg-secondary/20">
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">🔍 Lista de Variações (O robô enviará apenas 1 destas para cada pessoa):</p>
+                  {form.message_template.split("|||").filter(m => m.trim()).map((m, idx) => (
+                    <div key={idx} className="text-[10px] p-1.5 bg-background rounded border border-border/30 flex gap-2">
+                      <span className="text-primary font-bold">#{idx + 1}</span>
+                      <span className="text-muted-foreground truncate">{m.trim()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               {form.channel === "sms" && (
                 <p className="text-xs text-muted-foreground mt-1">
                   {form.message_template.length}/160 caracteres
@@ -212,18 +260,40 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
               )}
               {form.channel === "whatsapp" && (
                 <div className="bg-primary/10 border border-primary/20 rounded-md p-3 mt-2 text-xs text-primary/80">
-                  <p className="font-semibold mb-1">Evite Bloqueios no WhatsApp (OBRIGATÓRIO):</p>
-                  Crie pelo menos <strong>15 variações</strong> diferentes desta mensagem e separe-as por <code>|||</code>. O sistema vai rotacionar as mensagens e aplicar delays (3s a 30s) aleatórios pra cada cliente.
-                  <p className="mt-1">💡 <strong>Dica:</strong> Peça ao Jarvis no Chat ou Relatórios para "Gerar 15 variações da mensagem de pós venda para régua e separar com |||".</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-primary">Sistema Anti-Bloqueio WhatsApp:</p>
+                    {form.message_template.includes("|||") && (
+                      <Badge variant="outline" className="bg-primary/20 border-primary/30 text-[10px] h-5">
+                        {form.message_template.split("|||").filter(m => m.trim()).length} variações detectadas
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="opacity-80">
+                    O sistema rotacionará as mensagens e aplicará delays aleatórios (3s a 30s) para cada cliente.
+                  </p>
                 </div>
               )}
             </div>
 
             {form.message_template && (
               <div>
-                <Label className="text-foreground text-xs">Preview</Label>
-                <Card className="p-3 mt-1 bg-secondary/50 border-border">
-                  <p className="text-sm text-foreground whitespace-pre-wrap">{previewMessage()}</p>
+                <div className="flex items-center justify-between mb-1">
+                  <Label className="text-foreground text-xs">👀 Preview (Exemplo de 1 variação)</Label>
+                  {form.message_template.includes("|||") && (
+                    <p className="text-[10px] text-muted-foreground">O sistema escolhe 1 por cliente aleatoriamente</p>
+                  )}
+                </div>
+                <Card className="p-3 bg-secondary/30 border-border border-dashed">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">
+                    {(() => {
+                      const variants = form.message_template.split("|||").filter(m => m.trim());
+                      let msg = variants[0] || ""; // Show first as example
+                      Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
+                        msg = msg.split(key).join(val);
+                      });
+                      return msg;
+                    })()}
+                  </p>
                 </Card>
               </div>
             )}
@@ -252,7 +322,26 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Mensagem</p>
-                <p className="text-sm text-foreground whitespace-pre-wrap">{previewMessage()}</p>
+                <div className="bg-background/50 p-2 rounded border border-border mt-1">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">
+                    {(() => {
+                        const variants = form.message_template.split("|||").filter(m => m.trim());
+                        let msg = variants[0] || "";
+                        Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
+                          msg = msg.split(key).join(val);
+                        });
+                        return msg;
+                      })()}
+                  </p>
+                  {form.message_template.includes("|||") && (
+                    <div className="mt-2 pt-2 border-t border-border flex items-center justify-between">
+                      <span className="text-[10px] text-primary font-medium flex items-center gap-1">
+                         <Sparkles className="h-2.5 w-2.5" />
+                         Contém {form.message_template.split("|||").filter(m => m.trim()).length} variações seguras
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             </Card>
 
