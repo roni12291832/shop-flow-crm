@@ -210,6 +210,13 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
                   {form.message_template.length}/160 caracteres
                 </p>
               )}
+              {form.channel === "whatsapp" && (
+                <div className="bg-primary/10 border border-primary/20 rounded-md p-3 mt-2 text-xs text-primary/80">
+                  <p className="font-semibold mb-1">Evite Bloqueios no WhatsApp (OBRIGATÓRIO):</p>
+                  Crie pelo menos <strong>15 variações</strong> diferentes desta mensagem e separe-as por <code>|||</code>. O sistema vai rotacionar as mensagens e aplicar delays (3s a 30s) aleatórios pra cada cliente.
+                  <p className="mt-1">💡 <strong>Dica:</strong> Peça ao Jarvis no Chat ou Relatórios para "Gerar 15 variações da mensagem de pós venda para régua e separar com |||".</p>
+                </div>
+              )}
             </div>
 
             {form.message_template && (
