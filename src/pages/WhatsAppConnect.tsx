@@ -128,32 +128,38 @@ export default function WhatsAppConnect() {
         "Content-Type": "application/json",
       };
 
-      // Attempt to create/connect using the specific /wa/create endpoint
-      const createRes = await fetch(`${apiUrl}/wa/create`, {
+      // Attempt to create/connect using the official V2 endpoint /instance/init
+      const createRes = await fetch(`${apiUrl}/instance/init`, {
         method: "POST",
-        headers,
-        body: JSON.stringify({ instanceName, qrcode: true }),
+        headers: {
+          ...headers,
+          "admintoken": apiToken // Docs say admintoken is needed for creating an instance
+        },
+        body: JSON.stringify({ name: instanceName }),
       });
       
       if (createRes.status === 401 || createRes.status === 403) {
-        throw new Error("Token da API inválido (Verifique seu token)");
+        throw new Error("Token da API inválido (Verifique o admintoken no painel)");
       }
 
-      if (!createRes.ok) {
+      if (!createRes.ok && createRes.status !== 409) { // 409 usually means already exists
         throw new Error(`Erro ${createRes.status} no servidor da API ao criar conexão`);
       }
 
-      const createData = await createRes.json();
-      console.log("Resposta do servidor API (/wa/create):", createData);
+      const createData = await createRes.json().catch(() => ({}));
+      console.log("Resposta do servidor API (/instance/init):", createData);
       
       // Attempt to set webhook (Non-fatal if it fails)
       const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
       try {
         await fetch(`${apiUrl}/webhook/set`, {
           method: "POST",
-          headers,
+          headers: {
+            ...headers,
+            "apikey": createData?.hash || apiToken // some APIs use the returned hash as apikey for config
+          },
           body: JSON.stringify({
-            instanceName,
+            instanceName: instanceName,
             enabled: true,
             url: webhookUrl,
             events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"]
@@ -163,7 +169,7 @@ export default function WhatsAppConnect() {
         console.warn("Aviso: Configuração do Webhook falhou, mas continuando...", e);
       }
 
-      // Check if the QR code is in the response of /wa/create
+      // Check if the QR code is in the response of /instance/init
       if (createData?.base64 || createData?.qrcode?.base64 || createData?.qrcode) {
         processQrData(createData);
       } else {
@@ -171,13 +177,20 @@ export default function WhatsAppConnect() {
         await new Promise(resolve => setTimeout(resolve, 1500));
         let connectData = null;
         try {
-          const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "POST", headers });
+          const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { 
+            method: "GET", // Evolution V2 usually uses GET for connect
+            headers: {
+              ...headers,
+              "apikey": apiToken,
+              "Authorization": `Bearer ${apiToken}`
+            } 
+          });
           if (res.ok) connectData = await res.json();
         } catch(e) {}
 
         if (!connectData) {
           try {
-            const getRes = await fetch(`${apiUrl}/wa/connect/${instanceName}`, { method: "GET", headers });
+            const getRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "POST", headers });
             if (getRes.ok) connectData = await getRes.json();
           } catch(e) {}
         }
