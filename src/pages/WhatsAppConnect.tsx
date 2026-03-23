@@ -156,10 +156,10 @@ export default function WhatsAppConnect() {
 
       await new Promise(resolve => setTimeout(resolve, 1500));
 
-      // --- STEP 2: CONNECT INSTANCE & GET QR CODE ---
-      let connectData = null;
+      // --- STEP 2: CONNECT INSTANCE & POLLING FOR QR CODE ---
+      let connectData: any = null;
 
-      // Faz a chamada oficial V2 POST /instance/connect
+      // Chama POST /instance/connect para iniciar a Engine do WhatsApp na UAZAPI
       try {
         const res = await fetch(`${apiUrl}/instance/connect`, { 
           method: "POST", 
@@ -180,10 +180,15 @@ export default function WhatsAppConnect() {
         console.log("Falha no POST /instance/connect", e);
       }
 
-      // Se falhar ou não trouxer QR, tenta o V2 GET /instance/status
       const hasQr = (d: any) => d?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
 
-      if (!hasQr(connectData)) {
+      // Se a resposta imediata não trouxer o QR Code (normal, pois a Engine demora a ligar), inicia o Polling
+      let maxAttempts = 15; // 15 tentativas x 2 segundos = 30 segundos
+      let foundQr = hasQr(connectData);
+
+      while (!foundQr && maxAttempts > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        maxAttempts--;
         try {
           const statusRes = await fetch(`${apiUrl}/instance/status`, {
             method: "GET",
@@ -196,20 +201,16 @@ export default function WhatsAppConnect() {
           });
           if (statusRes.ok) {
             const statusData = await statusRes.json();
-            console.log("Status Data (GET /instance/status):", statusData);
+            console.log(`Polling Status (${maxAttempts}):`, statusData);
             if (hasQr(statusData)) {
               connectData = statusData;
+              foundQr = true;
+            } else if (statusData?.instance?.status === "connected" || statusData?.status === "connected") {
+               connectData = statusData;
+               break; // Está conectado, não precisa esperar o QR
             }
           }
         } catch(e) {}
-      }
-
-      // Se todas as rotas V2 puras falharem, tenta as rotas mistas/antigas
-      if (!hasQr(connectData)) {
-        try {
-          const fallbackRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "GET", headers: { ...headers, "apikey": apiToken, "admintoken": apiToken, "token": instanceToken }});
-          if (fallbackRes.ok) connectData = await fallbackRes.json();
-        } catch (e) {}
       }
 
       processQrData(connectData || createData);
@@ -226,11 +227,11 @@ export default function WhatsAppConnect() {
         if (qrString) {
           setQrCode(qrString);
           toast.success("QR Code gerado! Escaneie com o WhatsApp");
-        } else if (data?.instance?.state === "open" || data?.connected || data?.instance?.status === "connected") {
+        } else if (data?.connected || data?.instance?.status === "connected" || data?.status === "connected" || data?.state === "connected") {
           updateStatusInDb("connected");
           toast.success("WhatsApp já está conectado!");
         } else {
-          toast.error("Não foi possível gerar o QR Code (veja o console)");
+          toast.error("Demorou muito para gerar o QR Code. Tente reconectar.");
           updateStatusInDb("disconnected");
         }
       }
