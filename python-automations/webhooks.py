@@ -105,7 +105,7 @@ async def receive_whatsapp_message(request: Request):
     db.table("messages").insert(msg_payload).execute()
     logger.info(f"Mensagem salva de {push_name}: {message_text[:50]}...")
 
-    # ─── 3. Cria Oportunidade (Pipeline) se for Lead Novo ─────────────
+    # ─── 3. Cria ou Atualiza Oportunidade (Pipeline) ──────────────────
     if is_new:
         opp_payload = {
             "title": f"Lead WhatsApp - {push_name or phone}",
@@ -115,6 +115,20 @@ async def receive_whatsapp_message(request: Request):
         }
         db.table("opportunities").insert(opp_payload).execute()
         logger.info(f"Nova oportunidade criada no pipeline para {push_name}")
+    else:
+        # Tenta atualizar oportunidade existente (verificar intenção)
+        active_opp_res = db.table("opportunities").select("id, stage").eq("client_id", client_id).in_("stage", ["lead_novo", "contato_iniciado"]).order("created_at", desc=True).limit(1).execute()
+        
+        if active_opp_res.data and len(active_opp_res.data) > 0:
+            opp = active_opp_res.data[0]
+            # Usa IA para ver se demonstrou interesse em produto
+            try:
+                is_interested = await jarvis.analyze_client_intent(message_text)
+                if is_interested:
+                    db.table("opportunities").update({"stage": "interessado"}).eq("id", opp["id"]).execute()
+                    logger.info(f"Oportunidade de {push_name} atualizada para 'interessado' via IA.")
+            except Exception as e:
+                logger.warning(f"Erro ao analisar intenção do cliente via IA: {e}")
 
     # ─── 4. Resposta Automática via Jarvis (se ativada) ───────────────
     try:

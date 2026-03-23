@@ -47,7 +47,7 @@ export default function Clients() {
 
   const fetchClients = async () => {
     console.log("Fetching clients...");
-    const { data, error } = await supabase.from("clients").select("id, name, phone, email, city, origin, tags, ticket_medio, score, temperature, created_at").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("clients").select("*").order("created_at", { ascending: false });
     
     if (error) {
       console.error("Error fetching clients:", error);
@@ -164,9 +164,9 @@ export default function Clients() {
   };
 
   const filtered = clients.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.city?.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone?.includes(search)
+    (c.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.city || "").toLowerCase().includes(search.toLowerCase()) ||
+    (c.phone || "").includes(search)
   );
 
   return (

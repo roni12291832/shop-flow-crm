@@ -127,6 +127,23 @@ Gere uma resposta adequada:
         )
         return response.choices[0].message.content
 
+    async def analyze_client_intent(self, client_message: str) -> bool:
+        """Avalia se a mensagem do cliente demonstra interesse em algum produto."""
+        messages = [
+            {"role": "system", "content": """Você é um classificador de intenção. 
+Avalie se a mensagem do cliente expressa interesse em comprar, quer saber preço, pergunta sobre um produto específico, ou demonstra intenção de compra de qualquer forma.
+Responda APENAS "SIM" se for interesse, ou "NAO" caso contrário (por exemplo: um simples 'oi', erro, mensagem vazia, ou assunto não relacionado)."""},
+            {"role": "user", "content": f"Mensagem do cliente: {client_message}"}
+        ]
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.0,
+            max_tokens=10,
+        )
+        return "SIM" in response.choices[0].message.content.strip().upper()
+
     # ─── Coletores de Contexto ────────────────────────────────────────────
 
     async def _collect_daily_context(self) -> str:
