@@ -123,56 +123,88 @@ export default function WhatsAppConnect() {
 
     await updateStatusInDb("connecting");
     try {
-      // Try to create instance first
-      await fetch(`${apiUrl}/instance/create`, {
+      const headers = {
+        "apikey": apiToken,
+        "Content-Type": "application/json",
+      };
+
+      // Attempt to create/connect using the specific /wa/create endpoint
+      const createRes = await fetch(`${apiUrl}/wa/create`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ instanceName, qrcode: true }),
       });
+      
+      if (createRes.status === 401 || createRes.status === 403) {
+        throw new Error("Token da API inválido (Verifique seu token)");
+      }
 
-      // --- AUTO-CONFIG WEBHOOK (Zero-Touch Setup) ---
-      // We set the webhook to point to the Render backend automatically
+      if (!createRes.ok) {
+        throw new Error(`Erro ${createRes.status} no servidor da API ao criar conexão`);
+      }
+
+      const createData = await createRes.json();
+      console.log("Resposta do servidor API (/wa/create):", createData);
+      
+      // Attempt to set webhook (Non-fatal if it fails)
       const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
       try {
-        await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+        await fetch(`${apiUrl}/webhook/set`, {
           method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiToken}`,
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify({
+            instanceName,
             enabled: true,
             url: webhookUrl,
-            webhookByEvents: false,
             events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE"]
           }),
         });
-        console.log("Webhook auto-configured to:", webhookUrl);
-      } catch (webhookErr) {
-        console.error("Failed to auto-configure webhook (not fatal):", webhookErr);
+      } catch (e) {
+        console.warn("Aviso: Configuração do Webhook falhou, mas continuando...", e);
       }
 
-      // Then get QR code
-      const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, {
-        headers: { "Authorization": `Bearer ${apiToken}` },
-      });
-      const data = await res.json();
-      
-      if (data?.base64 || data?.qrcode?.base64) {
-        setQrCode(data.base64 || data.qrcode.base64);
-        toast.success("QR Code gerado! Escaneie com o WhatsApp");
-      } else if (data?.instance?.state === "open") {
-        await updateStatusInDb("connected");
-        toast.success("WhatsApp já está conectado!");
+      // Check if the QR code is in the response of /wa/create
+      if (createData?.base64 || createData?.qrcode?.base64 || createData?.qrcode) {
+        processQrData(createData);
       } else {
-        toast.error("Não foi possível gerar o QR Code");
-        await updateStatusInDb("disconnected");
+        // Fallback: wait a bit and explicitly call a generic connect/QR endpoint
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        let connectData = null;
+        try {
+          const res = await fetch(`${apiUrl}/instance/connect/${instanceName}`, { method: "POST", headers });
+          if (res.ok) connectData = await res.json();
+        } catch(e) {}
+
+        if (!connectData) {
+          try {
+            const getRes = await fetch(`${apiUrl}/wa/connect/${instanceName}`, { method: "GET", headers });
+            if (getRes.ok) connectData = await getRes.json();
+          } catch(e) {}
+        }
+        processQrData(connectData || createData);
       }
-    } catch (err) {
-      toast.error("Erro ao conectar com a API UAZAPI");
+      
+      function processQrData(data: any) {
+        if (!data) {
+           toast.error("Não recebemos dados do QR Code");
+           updateStatusInDb("disconnected");
+           return;
+        }
+        if (data?.base64 || data?.qrcode?.base64 || data?.qrcode) {
+          setQrCode(data.base64 || data?.qrcode?.base64 || data.qrcode);
+          toast.success("QR Code gerado! Escaneie com o WhatsApp");
+        } else if (data?.instance?.state === "open" || data?.connected) {
+          updateStatusInDb("connected");
+          toast.success("WhatsApp já está conectado!");
+        } else {
+          toast.error("Não foi possível gerar o QR Code");
+          updateStatusInDb("disconnected");
+        }
+      }
+      
+    } catch (err: any) {
+      console.error("Connection Error:", err);
+      toast.error(`Erro na API UAZAPI: ${err.message || "Verifique a URL e o Token"}`);
       await updateStatusInDb("disconnected");
     }
     setLoading(false);
