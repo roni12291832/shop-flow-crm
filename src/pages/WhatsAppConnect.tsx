@@ -19,6 +19,13 @@ export default function WhatsAppConnect() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [dbRecordId, setDbRecordId] = useState<string | null>(null);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
+  const addLog = (msg: string, data?: any) => {
+    const logStr = data ? `${msg} | Data: ${JSON.stringify(data)}` : msg;
+    console.log("[WA-DEBUG]", logStr);
+    setDebugLogs(prev => [...prev, logStr]);
+  };
 
   // Load saved config from DB
   useEffect(() => {
@@ -115,6 +122,8 @@ export default function WhatsAppConnect() {
       return;
     }
     setLoading(true);
+    setDebugLogs([]); // Clear previous logs
+    addLog(`Iniciando geração de QR para a instância: ${instanceName}`);
     
     // Auto-save/update config if needed before generating QR
     if (!dbRecordId || saved === false) {
@@ -128,6 +137,7 @@ export default function WhatsAppConnect() {
         "Content-Type": "application/json",
       };
 
+      addLog(`[STEP 1] POST /instance/init com nome: ${instanceName}`);
       // --- STEP 1: INITIALIZE INSTANCE ---
       const createRes = await fetch(`${apiUrl}/instance/init`, {
         method: "POST",
@@ -138,27 +148,35 @@ export default function WhatsAppConnect() {
         body: JSON.stringify({ name: instanceName }),
       });
       
+      const statusText1 = createRes.status;
+      addLog(`[STEP 1] Init HTTP Status: ${statusText1}`);
+
       if (createRes.status === 401 || createRes.status === 403) {
         throw new Error("Token da API inválido (Verifique o admintoken no painel)");
       }
 
       let createData: any = {};
       if (createRes.ok) {
-        createData = await createRes.json().catch(() => ({}));
-        console.log("Instância Criada/Iniciada:", createData);
+        const textData = await createRes.text();
+        try { createData = JSON.parse(textData); } catch(e) {}
+        addLog("[STEP 1] Instância Criada/Iniciada", createData);
       } else if (createRes.status !== 409 && createRes.status !== 400) {
+        const errText = await createRes.text().catch(() => "");
+        addLog(`[STEP 1] Erro do Servidor`, errText);
         throw new Error(`Erro ${createRes.status} no servidor ao criar conexão`);
       }
 
       // Tenta achar o token da instância (padrão v2 UAZAPI)
       // Pode vir em createData.instance.token, createData.hash.token, ou ser a propria global apikey
       const instanceToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
+      addLog(`[Token] Usando token da instância: ${instanceToken ? instanceToken.substring(0,8) + '...' : 'Vazio'}`);
 
       await new Promise(resolve => setTimeout(resolve, 1500));
 
       // --- STEP 2: CONNECT INSTANCE & POLLING FOR QR CODE ---
       let connectData: any = null;
 
+      addLog(`[STEP 2] POST /instance/connect`);
       // Chama POST /instance/connect para iniciar a Engine do WhatsApp na UAZAPI
       try {
         const res = await fetch(`${apiUrl}/instance/connect`, { 
@@ -172,12 +190,16 @@ export default function WhatsAppConnect() {
           },
           body: JSON.stringify({ "base64": true })
         });
-        if (res.ok) {
-          connectData = await res.json();
-          console.log("Connect Data (POST /instance/connect):", connectData);
+        const connText = await res.text();
+        addLog(`[STEP 2] Response Status: ${res.status}`);
+        try {
+          connectData = JSON.parse(connText);
+          addLog("[STEP 2] Connect Data", connectData);
+        } catch(e) {
+          addLog(`[STEP 2] Resposta Não-JSON`, connText);
         }
-      } catch(e) {
-        console.log("Falha no POST /instance/connect", e);
+      } catch(e: any) {
+        addLog(`[STEP 2] Falha na requisição fetch: ${e.message}`, e);
       }
 
       const hasQr = (d: any) => d?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
@@ -186,7 +208,10 @@ export default function WhatsAppConnect() {
       let maxAttempts = 15; // 15 tentativas x 2 segundos = 30 segundos
       let foundQr = hasQr(connectData);
 
+      if (foundQr) addLog(`[Polling] QR Code encontrado instantaneamente no passo 2!`);
+
       while (!foundQr && maxAttempts > 0) {
+        addLog(`[Polling] Aguardando 2s (Tentativas restantes: ${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, 2000));
         maxAttempts--;
         try {
@@ -199,24 +224,33 @@ export default function WhatsAppConnect() {
               "apikey": apiToken
             }
           });
+          const textRes = await statusRes.text();
+          addLog(`[Polling] Status Req HTTP: ${statusRes.status}`, textRes);
+          
           if (statusRes.ok) {
-            const statusData = await statusRes.json();
-            console.log(`Polling Status (${maxAttempts}):`, statusData);
-            if (hasQr(statusData)) {
-              connectData = statusData;
-              foundQr = true;
-            } else if (statusData?.instance?.status === "connected" || statusData?.status === "connected") {
-               connectData = statusData;
-               break; // Está conectado, não precisa esperar o QR
-            }
+            try {
+              const statusData = JSON.parse(textRes);
+              if (hasQr(statusData)) {
+                connectData = statusData;
+                foundQr = true;
+                addLog(`[Polling] QR Code recebido com sucesso!`);
+              } else if (statusData?.instance?.status === "connected" || statusData?.status === "connected") {
+                 connectData = statusData;
+                 addLog(`[Polling] Status consta como 'connected', ignorando QR code.`);
+                 break; // Está conectado, não precisa esperar o QR
+              }
+            } catch(e) {}
           }
-        } catch(e) {}
+        } catch(e: any) {
+          addLog(`[Polling] Erro HTTP no status: ${e.message}`);
+        }
       }
 
       processQrData(connectData || createData);
       
       function processQrData(data: any) {
         if (!data) {
+           addLog(`[ProcessQR] Nenhum dado de QR Code recebido.`);
            toast.error("Não recebemos dados do QR Code");
            updateStatusInDb("disconnected");
            return;
@@ -225,20 +259,24 @@ export default function WhatsAppConnect() {
         const qrString = data?.base64 || data?.qrcode?.base64 || data?.qrcode || data?.instance?.qrcode || data?.instance?.base64;
         
         if (qrString) {
+          addLog(`[ProcessQR] Sucesso. Tamanho do QR: ${qrString.length} chars`);
           setQrCode(qrString);
           toast.success("QR Code gerado! Escaneie com o WhatsApp");
         } else if (data?.connected || data?.instance?.status === "connected" || data?.status === "connected" || data?.state === "connected") {
+          addLog(`[ProcessQR] Instância já conectada!`);
           updateStatusInDb("connected");
           toast.success("WhatsApp já está conectado!");
         } else {
-          toast.error("Demorou muito para gerar o QR Code. Tente reconectar.");
+          addLog(`[ProcessQR] QR Code não encontrado nos dados finais.`);
+          toast.error("Demorou muito para gerar o QR Code. Veja os logs.");
           updateStatusInDb("disconnected");
         }
       }
       
     } catch (err: any) {
+      addLog(`[ERRO FATAL]`, err.message || err.toString());
       console.error("Connection Error:", err);
-      toast.error(`Erro na API UAZAPI: ${err.message || "Verifique a URL e o Token"}`);
+      toast.error(`Erro na conexão. Veja os logs de depuração para detalhes.`);
       await updateStatusInDb("disconnected");
     }
     setLoading(false);
@@ -386,6 +424,18 @@ export default function WhatsAppConnect() {
             Abra o WhatsApp no celular → Menu (⋮) → Dispositivos Conectados → Conectar Dispositivo → Escaneie o QR Code acima
           </p>
         </div>
+      )}
+
+      {/* Logs de Depuração */}
+      {debugLogs.length > 0 && (
+        <details className="mt-4 bg-muted border border-border rounded-xl p-4 text-xs">
+          <summary className="text-foreground font-semibold cursor-pointer mb-2">Logs de Depuração da Conexão (Clique para expandir)</summary>
+          <div className="space-y-1 mt-2 max-h-60 overflow-y-auto font-mono whitespace-pre-wrap break-all text-muted-foreground">
+            {debugLogs.map((log, i) => (
+              <div key={i} className="border-b border-border/50 pb-1">{log}</div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
