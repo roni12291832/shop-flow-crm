@@ -133,6 +133,7 @@ async def process_rule(rule: dict, wp_config: dict) -> None:
                 instance_name=wp_config["instance_name"],
                 phone=phone,
                 message=personalized_msg,
+                instance_token=wp_config.get("instance_token")
             )
             if "error" in resp:
                 status = "falha"

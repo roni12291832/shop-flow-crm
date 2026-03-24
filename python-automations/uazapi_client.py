@@ -19,9 +19,9 @@ class UazapiClient:
         # Configuration is now dynamic per-instance from the DB
         pass
 
-    async def send_text(self, api_url: str, api_token: str, instance_name: str, phone: str, message: str) -> dict:
+    async def send_text(self, api_url: str, api_token: str, instance_name: str, phone: str, message: str, instance_token: str | None = None) -> dict:
         """
-        Envia mensagem de texto simples via Evolution API.
+        Envia mensagem de texto simples.
         phone: número com DDI, ex: 5511999999999
         """
         url = f"{api_url.rstrip('/')}/message/sendText/{instance_name}"
@@ -29,6 +29,9 @@ class UazapiClient:
             "Content-Type": "application/json",
             "apikey": api_token,
         }
+        if instance_token:
+            headers["token"] = instance_token
+
         payload = {
             "number": f"{self._format_phone(phone)}@s.whatsapp.net",
             "text": message,
@@ -46,13 +49,18 @@ class UazapiClient:
                 logger.error(f"Erro ao enviar para {phone}: {e}")
                 return {"error": str(e)}
 
-    async def set_webhook(self, api_url: str, api_token: str, instance_name: str, webhook_url: str) -> dict:
+    async def set_webhook(self, api_url: str, api_token: str, instance_name: str, webhook_url: str, instance_token: str | None = None) -> dict:
         """Configura a URL do webhook na instância da Evolution API."""
         url = f"{api_url.rstrip('/')}/instance/webhook/{instance_name}"
         headers = {
             "Content-Type": "application/json",
             "apikey": api_token,
         }
+        if instance_token:
+            headers["token"] = instance_token
+            # Em uazapiGO o endpoint pode ser apenas /webhook
+            # Vamos tentar o padrão primeiro, se falhar o chamador trata
+            
         payload = {
             "url": webhook_url,
             "enabled": True,
@@ -121,10 +129,15 @@ class UazapiClient:
 
         return results
 
-    async def get_instance_status(self, api_url: str, api_token: str, instance_name: str) -> dict:
-        """Verifica status de conexão da instância na Evolution API."""
-        url = f"{api_url.rstrip('/')}/instance/connectionState/{instance_name}"
-        headers = {"apikey": api_token}
+    async def get_instance_status(self, api_url: str, api_token: str, instance_name: str, instance_token: str | None = None) -> dict:
+        """Verifica status de conexão da instância."""
+        if instance_token:
+            url = f"{api_url.rstrip('/')}/instance/status"
+            headers = {"token": instance_token}
+        else:
+            url = f"{api_url.rstrip('/')}/instance/connectionState/{instance_name}"
+            headers = {"apikey": api_token}
+            
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 resp = await client.get(url, headers=headers)
