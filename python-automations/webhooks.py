@@ -53,19 +53,33 @@ async def receive_whatsapp_message(request: Request):
     logger.info(f"Webhook recebido: evento={event} | data_type={type(message_data)}")
 
     if isinstance(message_data, dict):
+        # Se for Evolution/v2, os dados podem estar dentro de 'messages' (lista)
+        if "messages" in message_data and isinstance(message_data["messages"], list) and message_data["messages"]:
+            message_data = message_data["messages"][0]
+
         # Tenta vários caminhos comuns para o JID e Conteúdo
         remote_jid = (
             message_data.get("key", {}).get("remoteJid", "") 
             or message_data.get("from", "")
             or message_data.get("chatId", "")
-        )
-        message_text = (
-            message_data.get("message", {}).get("conversation", "")
-            or message_data.get("message", {}).get("extendedTextMessage", {}).get("text", "")
-            or message_data.get("body", "")
-            or message_data.get("text", "")
+            or message_data.get("participant", "")
             or ""
         )
+        msg_obj = message_data.get("message", {}) or {}
+        
+        if isinstance(msg_obj, str):
+            message_text = msg_obj
+        else:
+            message_text = (
+                msg_obj.get("conversation", "")
+                or msg_obj.get("extendedTextMessage", {}).get("text", "")
+                or msg_obj.get("imageMessage", {}).get("caption", "")
+                or msg_obj.get("videoMessage", {}).get("caption", "")
+                or message_data.get("body", "")
+                or message_data.get("text", "")
+                or ""
+            )
+
         from_me = (
             message_data.get("key", {}).get("fromMe", False)
             or message_data.get("fromMe", False)
@@ -74,6 +88,7 @@ async def receive_whatsapp_message(request: Request):
             message_data.get("pushName", "") 
             or message_data.get("senderName", "")
             or message_data.get("name", "")
+            or f"WhatsApp {remote_jid.split('@', 1)[0][-4:] if '@' in remote_jid else 'Lead'}"
         )
     else:
         return {"status": "ignored", "reason": "formato de dados não reconhecido"}
