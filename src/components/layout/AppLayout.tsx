@@ -15,11 +15,15 @@ const PAGE_TITLES: Record<string, { title: string; sub: string }> = {
   "/chat": { title: "WhatsApp", sub: "Central de Atendimento" },
   "/tasks": { title: "Tarefas", sub: "Gestão de Atividades" },
   "/ranking": { title: "Ranking", sub: "Gamificação de Vendedores" },
+  "/fidelidade": { title: "Programa de Fidelidade", sub: "Retenção e Recompensas" },
   "/reports": { title: "Relatórios", sub: "Análise de Dados" },
+  "/financeiro": { title: "Financeiro Operacional", sub: "Gestão de Fluxo de Caixa e DRE" },
   "/notifications": { title: "Notificações", sub: "Alertas do Sistema" },
   "/settings": { title: "Configurações", sub: "Personalização" },
   "/metas": { title: "Metas", sub: "Controle de Metas e Vendas" },
   "/metas/configurar": { title: "Configurar Metas", sub: "Definição de Metas por Período" },
+  "/catalogo": { title: "Catálogo", sub: "Gestão de Produtos e Grades" },
+  "/trocas": { title: "Trocas & Devoluções", sub: "Fluxo de Logística Reversa" },
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {

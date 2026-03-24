@@ -13,6 +13,8 @@ import Tasks from "./pages/Tasks";
 import Chat from "./pages/Chat";
 import Ranking from "./pages/Ranking";
 import Reports from "./pages/Reports";
+import Finance from "./pages/Finance";
+import Loyalty from "./pages/Loyalty";
 import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
 import Goals from "./pages/Goals";
@@ -25,6 +27,8 @@ import SellerMode from "./pages/SellerMode";
 import AdminPanel from "./pages/AdminPanel";
 import WhatsAppConnect from "./pages/WhatsAppConnect";
 import Inventory from "./pages/Inventory";
+import Catalog from "./pages/Catalog";
+import Exchanges from "./pages/Exchanges";
 import AdsDashboard from "./pages/AdsDashboard";
 import NotFound from "./pages/NotFound";
 import LiveChat from "./pages/LiveChat";
@@ -95,7 +99,11 @@ const AppRoutes = () => (
     <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="/ranking" element={<AdminRoute><Ranking /></AdminRoute>} />
     <Route path="/reports" element={<AdminRoute><Reports /></AdminRoute>} />
+    <Route path="/financeiro" element={<AdminRoute><Finance /></AdminRoute>} />
+    <Route path="/fidelidade" element={<AdminRoute><Loyalty /></AdminRoute>} />
     <Route path="/estoque" element={<AdminRoute><Inventory /></AdminRoute>} />
+    <Route path="/catalogo" element={<AdminRoute><Catalog /></AdminRoute>} />
+    <Route path="/trocas" element={<AdminRoute><Exchanges /></AdminRoute>} />
     <Route path="/anuncios" element={<AdminRoute><AdsDashboard /></AdminRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
     <Route path="/settings" element={<AdminRoute><Settings /></AdminRoute>} />

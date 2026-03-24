@@ -2,14 +2,15 @@ from __future__ import annotations
 """
 Rotas de Campanha — Sistema inteligente de disparos em massa com anti-bloqueio.
 """
-import logging
 from typing import Optional
+
 from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, HTTPException
+
+from core import logger, DRY_RUN, registrar_automacao, alertar_dono
 from supabase_client import get_supabase
 from uazapi_client import uazapi
 
-logger = logging.getLogger("campaigns")
 router = APIRouter(prefix="/campaigns", tags=["Campanhas"])
 
 # Stages do Pipeline (sincronizados com o Frontend)
@@ -29,12 +30,12 @@ class CampaignRequest(BaseModel):
     O campo `messages` DEVE conter pelo menos 15 variações diferentes
     para evitar bloqueio do WhatsApp.
     """
-    name: str                       # Nome da campanha
-    messages: list[str]             # Variações de mensagem (mínimo 15)
-    target_stages: list[str]        # Etapas do Pipeline para filtrar
-    target_origins: Optional[list[str]] = None  # Filtro opcional por origem
-    min_delay_seconds: int = 15     # Delay mínimo entre envios
-    max_delay_seconds: int = 60     # Delay máximo entre envios
+    name: str
+    messages: list[str]
+    target_stages: list[str]
+    target_origins: Optional[list[str]] = None
+    min_delay_seconds: int = 15
+    max_delay_seconds: int = 60
 
     @field_validator("messages")
     @classmethod
@@ -46,7 +47,6 @@ class CampaignRequest(BaseModel):
                 "💡 Dica: Cole esse comando no ChatGPT para gerar rapidamente:\n"
                 '   "Gere 15 variações dessa mensagem para mim: [SUA MENSAGEM AQUI]"'
             )
-        # Verifica se não tem mensagens duplicadas
         unique = set(v)
         if len(unique) < 15:
             raise ValueError(
@@ -97,77 +97,93 @@ async def dispatch_campaign(campaign: CampaignRequest):
     """
     db = get_supabase()
 
-    # ─── 1. Busca contatos alvo no Pipeline ───────────────────────────
-    # Busca oportunidades nas etapas selecionadas
+    # ─── Validação e coleta de dados (fora do registrar_automacao) ────────
     opps_res = db.table("opportunities").select("client_id").in_("stage", campaign.target_stages).execute()
     client_ids = list(set(opp["client_id"] for opp in (opps_res.data or []) if opp.get("client_id")))
 
     if not client_ids:
         raise HTTPException(
             status_code=404,
-            detail=f"Nenhum contato encontrado nas etapas: {campaign.target_stages}"
+            detail=f"Nenhum contato encontrado nas etapas: {campaign.target_stages}",
         )
 
-    # Busca dados dos clientes
     clients_res = db.table("clients").select("id, name, phone, email, origin").in_("id", client_ids).execute()
     contacts = clients_res.data or []
 
-    # Filtra por origem se especificado
     if campaign.target_origins:
         contacts = [c for c in contacts if c.get("origin") in campaign.target_origins]
 
-    # Filtra só os que têm telefone
     contacts_with_phone = [c for c in contacts if c.get("phone")]
-
     if not contacts_with_phone:
         raise HTTPException(
             status_code=404,
-            detail="Nenhum contato com telefone cadastrado nas etapas selecionadas."
+            detail="Nenhum contato com telefone cadastrado nas etapas selecionadas.",
         )
 
-    # ─── 2. Busca instância WhatsApp ──────────────────────────────────
-    instance_res = db.table("whatsapp_instances").select("api_url, api_token, instance_name").limit(1).execute()
+    instance_res = (
+        db.table("whatsapp_instances")
+        .select("api_url, api_token, instance_name")
+        .eq("status", "connected")
+        .limit(1)
+        .execute()
+    )
     if not instance_res.data:
-        raise HTTPException(
-            status_code=500,
-            detail="Nenhuma instância WhatsApp configurada no CRM."
-        )
+        raise HTTPException(status_code=500, detail="Nenhuma instância WhatsApp com status='open' no CRM.")
 
     inst = instance_res.data[0]
 
-    # ─── 3. Dispara campanha via UAZAPI ───────────────────────────────
-    logger.info(
-        f"🚀 Disparando campanha '{campaign.name}' para "
-        f"{len(contacts_with_phone)} contatos com {len(campaign.messages)} variações"
-    )
+    # ─── Disparo (dentro do registrar_automacao) ──────────────────────────
+    async with registrar_automacao(
+        "disparo_campanha",
+        {"nome": campaign.name, "total_contatos": len(contacts_with_phone), "etapas": campaign.target_stages},
+    ):
+        logger.info(
+            "Disparando campanha '%s' para %d contatos com %d variações",
+            campaign.name, len(contacts_with_phone), len(campaign.messages),
+        )
 
-    results = await uazapi.send_bulk_campaign(
-        api_url=inst["api_url"],
-        api_token=inst["api_token"],
-        instance_name=inst["instance_name"],
-        contacts=contacts_with_phone,
-        messages=campaign.messages,
-        min_delay=campaign.min_delay_seconds,
-        max_delay=campaign.max_delay_seconds,
-    )
+        if DRY_RUN:
+            logger.info(
+                "[DRY_RUN] Simulando disparo de '%s': %d contatos, %d variações",
+                campaign.name, len(contacts_with_phone), len(campaign.messages),
+            )
+            return CampaignResponse(
+                status="dry_run",
+                campaign_name=campaign.name,
+                total_contacts=len(contacts_with_phone),
+                sent=0,
+                failed=0,
+                errors=[],
+            )
 
-    # ─── 4. Registra campanha no banco ────────────────────────────────
-    try:
-        db.table("activities").insert({
-            "type": "campaign_dispatch",
-            "description": f"Campanha '{campaign.name}': {results['sent']} enviadas, {results['failed']} falhas",
-        }).execute()
-    except Exception:
-        pass  # Não crítico
+        results = await uazapi.send_bulk_campaign(
+            api_url=inst["api_url"],
+            api_token=inst["api_token"],
+            instance_name=inst["instance_name"],
+            contacts=contacts_with_phone,
+            messages=campaign.messages,
+            min_delay=campaign.min_delay_seconds,
+            max_delay=campaign.max_delay_seconds,
+        )
 
-    return CampaignResponse(
-        status="completed",
-        campaign_name=campaign.name,
-        total_contacts=len(contacts_with_phone),
-        sent=results["sent"],
-        failed=results["failed"],
-        errors=results.get("errors", [])[:10],
-    )
+        try:
+            db.table("activities").insert({
+                "type": "campaign_dispatch",
+                "description": (
+                    f"Campanha '{campaign.name}': {results['sent']} enviadas, {results['failed']} falhas"
+                ),
+            }).execute()
+        except Exception:
+            pass  # Não crítico
+
+        return CampaignResponse(
+            status="completed",
+            campaign_name=campaign.name,
+            total_contacts=len(contacts_with_phone),
+            sent=results["sent"],
+            failed=results["failed"],
+            errors=results.get("errors", [])[:10],
+        )
 
 
 @router.get("/preview/{stage}")

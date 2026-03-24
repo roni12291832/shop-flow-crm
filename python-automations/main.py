@@ -7,7 +7,6 @@ Para rodar:
   pip install -r requirements.txt
   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,19 +14,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+# core deve ser importado primeiro — inicializa o sistema de logs para todos os módulos
+from core import logger
 from config import get_settings
 from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
-
-# ─── Logging ──────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)-12s | %(levelname)-5s | %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger("main")
 
 # ─── Scheduler ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()

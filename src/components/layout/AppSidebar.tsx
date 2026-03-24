@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
-  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi, Package, Megaphone,
+  Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi, Package, Megaphone, Layers, RefreshCw, DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,13 @@ const navItems = [
   { icon: Zap, label: "Relacionamento", path: "/regua-relacionamento" },
   { icon: Star, label: "NPS", path: "/nps" },
   { icon: CheckSquare, label: "Tarefas", path: "/tasks" },
+  { icon: Star, label: "Fidelidade", path: "/fidelidade" },
   { icon: Trophy, label: "Ranking", path: "/ranking" },
   { icon: FileText, label: "Relatórios", path: "/reports" },
+  { icon: DollarSign, label: "Financeiro", path: "/financeiro" },
   { icon: Package, label: "Estoque", path: "/estoque" },
+  { icon: Layers, label: "Catálogo", path: "/catalogo" },
+  { icon: RefreshCw, label: "Trocas", path: "/trocas" },
   { icon: Megaphone, label: "Anúncios", path: "/anuncios" },
   { icon: Bell, label: "Notificações", path: "/notifications", badgeKey: "notifications" },
   { icon: Smartphone, label: "Modo Vendedor", path: "/vendedor" },

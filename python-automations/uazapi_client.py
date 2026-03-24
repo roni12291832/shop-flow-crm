@@ -46,6 +46,32 @@ class UazapiClient:
                 logger.error(f"Erro ao enviar para {phone}: {e}")
                 return {"error": str(e)}
 
+    async def set_webhook(self, api_url: str, api_token: str, instance_name: str, webhook_url: str) -> dict:
+        """Configura a URL do webhook na instância da Evolution API."""
+        url = f"{api_url.rstrip('/')}/instance/webhook/{instance_name}"
+        headers = {
+            "Content-Type": "application/json",
+            "apikey": api_token,
+        }
+        payload = {
+            "url": webhook_url,
+            "enabled": True,
+            "events": [
+                "MESSAGES_UPSERT", 
+                "MESSAGES_UPDATE", 
+                "MESSAGES_DELETE", 
+                "SEND_MESSAGE",
+                "CONNECTION_UPDATE"
+            ]
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao configurar webhook: {e}")
+                return {"error": str(e)}
+
     async def send_bulk_campaign(
         self,
         api_url: str,

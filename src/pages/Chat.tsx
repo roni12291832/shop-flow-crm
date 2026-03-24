@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Bot, Send, Plus, Trash2 } from "lucide-react";
+import { Search, Bot, Send, Plus, Trash2, WifiOff, Wifi } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -70,6 +70,7 @@ export default function Chat() {
   const [searchTerm, setSearchTerm] = useState("");
   const [newConvOpen, setNewConvOpen] = useState(false);
   const [newConvClientId, setNewConvClientId] = useState("");
+  const [wpConnected, setWpConnected] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = async () => {
@@ -133,7 +134,15 @@ export default function Chat() {
     }
   };
 
-  useEffect(() => { fetchConversations(); }, []);
+  useEffect(() => {
+    fetchConversations();
+    // Verifica status do WhatsApp ao carregar
+    supabase
+      .from("whatsapp_instances")
+      .select("status")
+      .maybeSingle()
+      .then(({ data }) => setWpConnected(data?.status === "connected"));
+  }, []);
   useEffect(() => { if (activeConvId) fetchMessages(activeConvId); }, [activeConvId, conversations.length]);
 
   // Realtime subscriptions
@@ -294,7 +303,22 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-60px)] animate-fade-in">
+    <div className="flex flex-col h-[calc(100vh-60px)] animate-fade-in">
+      {/* Banner de status WhatsApp */}
+      {wpConnected === false && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-destructive/10 border-b border-destructive/20 text-destructive text-xs font-medium shrink-0">
+          <WifiOff className="h-3.5 w-3.5" />
+          WhatsApp desconectado — mensagens serão salvas no CRM mas não enviadas pelo WhatsApp.
+          <a href="/whatsapp-connect" className="underline ml-1">Conectar agora</a>
+        </div>
+      )}
+      {wpConnected === true && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-chart-2/10 border-b border-chart-2/20 text-chart-2 text-xs font-medium shrink-0">
+          <Wifi className="h-3.5 w-3.5" />
+          WhatsApp conectado — mensagens enviadas e recebidas em tempo real.
+        </div>
+      )}
+    <div className="flex flex-1 min-h-0">
       {/* Sidebar conversas */}
       <div className="w-[280px] border-r border-border flex flex-col bg-card">
         <div className="p-4 border-b border-border flex gap-2">
@@ -412,7 +436,7 @@ export default function Chat() {
         </div>
       )}
 
-      {/* Client info panel */}
+    {/* Client info panel */}
       {activeConv && activeClient && (
         <div className="w-[220px] border-l border-border p-4 overflow-y-auto bg-card">
           <div className="text-center mb-4">
@@ -448,6 +472,7 @@ export default function Chat() {
           <Button variant="outline" size="sm" className="w-full mt-2 text-[12px] border-accent/40 text-accent hover:bg-accent/10">+ Criar Oportunidade</Button>
         </div>
       )}
+    </div>
     </div>
   );
 }
