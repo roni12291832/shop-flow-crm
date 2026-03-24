@@ -136,8 +136,8 @@ ${clients.slice(0, 5).map(c => `- ${c.name} (${c.origin || "sem origem"})${c.las
         .map(m => ({ role: m.role, content: m.content }));
       conversationMessages.push({ role: "user", content: userMsg.content });
 
-      // Call Python Backend on Render
-      const response = await fetch("https://shop-flow-crm-noleto.onrender.com/jarvis/ask", {
+      // Call Python Backend on Koyeb
+      const response = await fetch("https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/jarvis/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -326,8 +326,8 @@ export default function WhatsAppConnect() {
         // --- AUTO CONFIGURAÇÃO DE WEBHOOK (UAZAPI v2) ---
         try {
           addLog("[Webhook] Iniciando configuração automática v2...");
-          const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
-          
+          const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
+
           // UAZAPI v2 usa POST /webhook com o 'token' da instância
           const url = `${apiUrl}/webhook`;
           addLog(`[Webhook] Configurando via POST ${url}`);
@@ -470,7 +470,7 @@ export default function WhatsAppConnect() {
               <Button 
                 onClick={() => {
                     const setup = async () => {
-                      const webhookUrl = "https://shop-flow-crm-noleto.onrender.com/webhook/uzapi";
+                      const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
                       const currentToken = instanceToken || apiToken;
                       const endpoints = [
                         { url: `${apiUrl}/webhook`, headers: { "token": currentToken, "admintoken": apiToken } },
