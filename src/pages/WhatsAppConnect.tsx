@@ -99,21 +99,64 @@ export default function WhatsAppConnect() {
   const checkStatus = async () => {
     if (!apiUrl || !apiToken || !instanceName) return;
     setLoading(true);
-    try {
-      const res = await fetch(`${apiUrl}/instance/connectionState/${instanceName}`, {
+    setDebugLogs([]);
+    addLog(`Verificando status da instância: ${instanceName}`);
+
+    const isOpen = (data: any): boolean => {
+      const state =
+        data?.instance?.state ||
+        data?.instance?.status ||
+        data?.state ||
+        data?.status;
+      return state === "open" || state === "connected";
+    };
+
+    const attempts = [
+      {
+        label: "connectionState + apikey",
+        url: `${apiUrl}/instance/connectionState/${instanceName}`,
         headers: { "apikey": apiToken },
-      });
-      const data = await res.json();
-      const state = data?.instance?.state || data?.state || data?.status;
-      if (state === "open" || state === "connected") {
-        await updateStatusInDb("connected");
-        setQrCode(null);
-      } else {
-        await updateStatusInDb("disconnected");
+      },
+      {
+        label: "status + Authorization Bearer",
+        url: `${apiUrl}/instance/status/${instanceName}`,
+        headers: { "Authorization": `Bearer ${apiToken}` },
+      },
+      {
+        label: "status + apikey",
+        url: `${apiUrl}/instance/status/${instanceName}`,
+        headers: { "apikey": apiToken },
+      },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        addLog(`Tentando [${attempt.label}]: GET ${attempt.url}`);
+        const res = await fetch(attempt.url, { headers: attempt.headers });
+        addLog(`HTTP ${res.status}`);
+        const text = await res.text();
+        addLog(`Resposta: ${text}`);
+
+        if (res.ok) {
+          const data = JSON.parse(text);
+          if (isOpen(data)) {
+            addLog(`Conectado detectado via [${attempt.label}]!`);
+            await updateStatusInDb("connected");
+            setQrCode(null);
+            toast.success("WhatsApp conectado!");
+            setLoading(false);
+            return;
+          }
+          addLog(`Estado não reconhecido como conectado. JSON: ${JSON.stringify(data)}`);
+        }
+      } catch (e: any) {
+        addLog(`Erro em [${attempt.label}]: ${e.message}`);
       }
-    } catch {
-      await updateStatusInDb("disconnected");
     }
+
+    addLog("Nenhum endpoint retornou estado 'open' ou 'connected'. Veja os logs acima.");
+    await updateStatusInDb("disconnected");
+    toast.error("WhatsApp não reconhecido como conectado. Veja os logs abaixo.");
     setLoading(false);
   };
 
