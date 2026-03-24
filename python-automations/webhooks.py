@@ -40,22 +40,41 @@ async def receive_whatsapp_message(request: Request):
     except Exception:
         return {"status": "error", "message": "JSON inválido"}
 
-    event = body.get("event", "")
-    if event not in ("messages.upsert", "message"):
+    event = body.get("event", "") or body.get("type", "")
+    message_data = body.get("data", body)
+    
+    # Normalização para uazapiGO/Evolution
+    # O evento pode ser 'messages.upsert', 'message', 'messages', etc.
+    accepted_events = ("messages.upsert", "message", "messages", "CHAT_MESSAGE")
+    if event not in accepted_events and "instance" not in body:
+        logger.info(f"Webhook ignorado: evento '{event}' não está na lista de aceitos")
         return {"status": "ignored", "reason": f"evento {event} não processado"}
 
-    message_data = body.get("data", body)
+    logger.info(f"Webhook recebido: evento={event} | data_type={type(message_data)}")
 
     if isinstance(message_data, dict):
-        remote_jid = message_data.get("key", {}).get("remoteJid", "") or message_data.get("from", "")
+        # Tenta vários caminhos comuns para o JID e Conteúdo
+        remote_jid = (
+            message_data.get("key", {}).get("remoteJid", "") 
+            or message_data.get("from", "")
+            or message_data.get("chatId", "")
+        )
         message_text = (
             message_data.get("message", {}).get("conversation", "")
             or message_data.get("message", {}).get("extendedTextMessage", {}).get("text", "")
             or message_data.get("body", "")
+            or message_data.get("text", "")
             or ""
         )
-        from_me = message_data.get("key", {}).get("fromMe", False)
-        push_name = message_data.get("pushName", "") or message_data.get("senderName", "")
+        from_me = (
+            message_data.get("key", {}).get("fromMe", False)
+            or message_data.get("fromMe", False)
+        )
+        push_name = (
+            message_data.get("pushName", "") 
+            or message_data.get("senderName", "")
+            or message_data.get("name", "")
+        )
     else:
         return {"status": "ignored", "reason": "formato de dados não reconhecido"}
 

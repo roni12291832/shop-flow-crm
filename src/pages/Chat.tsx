@@ -185,11 +185,10 @@ export default function Chat() {
       status: "em_atendimento" as any,
     }).eq("id", activeConvId);
 
-    // Fetch WhatsApp config directly from DB instead of using N8N Webhooks
+    // Fetch WhatsApp config directly from DB
     const { data: wpConfig } = await supabase
       .from("whatsapp_instances")
-      .select("api_url, api_token, instance_name, status")
-      
+      .select("api_url, api_token, instance_name, instance_token, status")
       .maybeSingle();
 
     if (activeClient && wpConfig && wpConfig.status === "connected") {
@@ -200,12 +199,19 @@ export default function Chat() {
           const phoneDigits = activeClient.phone?.replace(/\D/g, "") || "";
           const formattedPhone = phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
 
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+          };
+          
+          if (wpConfig.instance_token) {
+            headers["token"] = wpConfig.instance_token;
+          } else {
+            headers["apikey"] = wpConfig.api_token;
+          }
+
           const res = await fetch(`${wpConfig.api_url}/message/sendText/${wpConfig.instance_name}`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "apikey": wpConfig.api_token
-            },
+            headers,
             body: JSON.stringify({
               number: `${formattedPhone}@s.whatsapp.net`,
               text: content
