@@ -104,24 +104,25 @@ export default function WhatsAppConnect() {
     if (tokenToSave) setInstanceToken(tokenToSave);
   };
 
+  const isOpen = (data: any): boolean => {
+    // Formato uazapiGO (Data.connected === true ou Data.status.connected === true)
+    if (data?.connected === true) return true;
+    if (data?.instance?.connected === true) return true;
+    if (data?.status?.connected === true) return true;
+    
+    const state =
+      data?.instance?.state ||
+      data?.instance?.status ||
+      data?.state ||
+      data?.status;
+    return state === "open" || state === "connected";
+  };
+
   const checkStatus = async () => {
     if (!apiUrl || !apiToken || !instanceName) return;
     setLoading(true);
     setDebugLogs([]);
     addLog(`Verificando status da instância: ${instanceName}`);
-
-    const isOpen = (data: any): boolean => {
-      // Formato uazapiGO (Data.connected === true)
-      if (data?.connected === true) return true;
-      if (data?.instance?.connected === true) return true;
-      
-      const state =
-        data?.instance?.state ||
-        data?.instance?.status ||
-        data?.state ||
-        data?.status;
-      return state === "open" || state === "connected";
-    };
 
     const attempts = [
       {
@@ -271,8 +272,7 @@ export default function WhatsAppConnect() {
       }
 
       let maxAttempts = 60; // 60 tentativas x 2 segundos = 120 segundos (~2 minutos para scannear)
-      const connState = connectData?.instance?.state || connectData?.state || connectData?.status;
-      let isConnected = (connectData?.connected === true) || connState === "open" || connState === "connected";
+      let isConnected = isOpen(connectData);
 
       addLog(`[Polling] Iniciando monitoramento da conexão (Até 120s)...`);
 
@@ -296,12 +296,10 @@ export default function WhatsAppConnect() {
           if (statusRes.ok) {
             try {
               const statusData = JSON.parse(textRes);
-              const state = statusData?.instance?.state || statusData?.state || statusData?.status;
-
-              if (state === "open" || state === "connected") {
+              if (isOpen(statusData)) {
                 connectData = statusData;
                 isConnected = true;
-                addLog(`[Polling] Estado '${state}' detectado — WhatsApp conectado com SUCESSO!`);
+                addLog(`[Polling] Conexão detectada — WhatsApp conectado com SUCESSO!`);
                 break;
               } else if (!foundQr && hasQr(statusData)) {
                 // Se ainda não tínhamos o QR e ele apareceu agora, mostra na tela
