@@ -19,6 +19,7 @@ export default function WhatsAppConnect() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [dbRecordId, setDbRecordId] = useState<string | null>(null);
+  const [instanceToken, setInstanceToken] = useState<string>("");
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
   const addLog = (msg: string, data?: any) => {
@@ -42,6 +43,7 @@ export default function WhatsAppConnect() {
         setApiUrl(data.api_url);
         setApiToken(data.api_token);
         setInstanceName(data.instance_name);
+        setInstanceToken(data.instance_token || "");
         setStatus((data.status as any) || "disconnected");
         setSaved(true);
       }
@@ -63,6 +65,7 @@ export default function WhatsAppConnect() {
         api_url: apiUrl,
         api_token: apiToken,
         instance_name: instanceName,
+        instance_token: instanceToken,
         status,
       }).eq("id", dbRecordId);
       error = res.error;
@@ -71,6 +74,7 @@ export default function WhatsAppConnect() {
         api_url: apiUrl,
         api_token: apiToken,
         instance_name: instanceName,
+        instance_token: instanceToken,
         status,
       }).select().single();
       error = res.error;
@@ -89,11 +93,15 @@ export default function WhatsAppConnect() {
     toast.success("Configuração salva no banco de dados!");
   };
 
-  const updateStatusInDb = async (newStatus: string) => {
+  const updateStatusInDb = async (newStatus: string, tokenToSave?: string) => {
+    const updateData: any = { status: newStatus };
+    if (tokenToSave) updateData.instance_token = tokenToSave;
+    
     if (dbRecordId) {
-      await supabase.from("whatsapp_instances").update({ status: newStatus }).eq("id", dbRecordId);
+      await supabase.from("whatsapp_instances").update(updateData).eq("id", dbRecordId);
     }
     setStatus(newStatus as "disconnected" | "connecting" | "connected");
+    if (tokenToSave) setInstanceToken(tokenToSave);
   };
 
   const checkStatus = async () => {
@@ -103,6 +111,10 @@ export default function WhatsAppConnect() {
     addLog(`Verificando status da instância: ${instanceName}`);
 
     const isOpen = (data: any): boolean => {
+      // Formato uazapiGO (Data.connected === true)
+      if (data?.connected === true) return true;
+      if (data?.instance?.connected === true) return true;
+      
       const state =
         data?.instance?.state ||
         data?.instance?.status ||
@@ -113,14 +125,14 @@ export default function WhatsAppConnect() {
 
     const attempts = [
       {
+        label: "uazapiGO: status + token header",
+        url: `${apiUrl}/instance/status`,
+        headers: { "token": instanceToken || apiToken },
+      },
+      {
         label: "connectionState + apikey",
         url: `${apiUrl}/instance/connectionState/${instanceName}`,
         headers: { "apikey": apiToken },
-      },
-      {
-        label: "status + Authorization Bearer",
-        url: `${apiUrl}/instance/status/${instanceName}`,
-        headers: { "Authorization": `Bearer ${apiToken}` },
       },
       {
         label: "status + apikey",
@@ -212,8 +224,9 @@ export default function WhatsAppConnect() {
 
       // Tenta achar o token da instância (padrão v2 UAZAPI)
       // Pode vir em createData.instance.token, createData.hash.token, ou ser a propria global apikey
-      const instanceToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
-      addLog(`[Token] Usando token da instância: ${instanceToken ? instanceToken.substring(0,8) + '...' : 'Vazio'}`);
+      const currentInstanceToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
+      addLog(`[Token] Usando token da instância: ${currentInstanceToken ? currentInstanceToken.substring(0,8) + '...' : 'Vazio'}`);
+      setInstanceToken(currentInstanceToken);
 
       await new Promise(resolve => setTimeout(resolve, 1500));
 
@@ -228,7 +241,7 @@ export default function WhatsAppConnect() {
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "token": instanceToken,
+            "token": currentInstanceToken,
             "admintoken": apiToken,
             "apikey": apiToken
           },
@@ -259,7 +272,7 @@ export default function WhatsAppConnect() {
 
       let maxAttempts = 60; // 60 tentativas x 2 segundos = 120 segundos (~2 minutos para scannear)
       const connState = connectData?.instance?.state || connectData?.state || connectData?.status;
-      let isConnected = connState === "open" || connState === "connected";
+      let isConnected = (connectData?.connected === true) || connState === "open" || connState === "connected";
 
       addLog(`[Polling] Iniciando monitoramento da conexão (Até 120s)...`);
 
@@ -269,11 +282,12 @@ export default function WhatsAppConnect() {
         await new Promise(resolve => setTimeout(resolve, 2000));
         maxAttempts--;
         try {
-          const statusRes = await fetch(`${apiUrl}/instance/connectionState/${instanceName}`, {
+          // Tenta primeiro o endpoint sugerido pelo diagnóstico: /instance/status com token
+          const statusRes = await fetch(`${apiUrl}/instance/status`, {
             method: "GET",
             headers: {
               "Accept": "application/json",
-              "apikey": apiToken,
+              "token": currentInstanceToken || apiToken,
             }
           });
           const textRes = await statusRes.text();
@@ -307,7 +321,7 @@ export default function WhatsAppConnect() {
 
       if (isConnected) {
         addLog(`[ProcessQR] Instância conectada!`);
-        updateStatusInDb("connected");
+        await updateStatusInDb("connected", currentInstanceToken);
         setQrCode(null);
         toast.success("WhatsApp conectado com sucesso!");
         
@@ -323,7 +337,7 @@ export default function WhatsAppConnect() {
           const res = await fetch(url, {
             method: "POST",
             headers: {
-              "token": instanceToken || apiToken,
+              "token": currentInstanceToken || apiToken,
               "Content-Type": "application/json"
             },
             body: JSON.stringify({

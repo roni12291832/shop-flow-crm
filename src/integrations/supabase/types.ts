@@ -938,6 +938,7 @@ export type Database = {
           api_url: string
           api_token: string
           instance_name: string
+          instance_token: string | null
           status: string | null
           created_at: string | null
           updated_at: string | null
@@ -947,6 +948,7 @@ export type Database = {
           api_url: string
           api_token: string
           instance_name: string
+          instance_token?: string | null
           status?: string | null
           created_at?: string | null
           updated_at?: string | null
@@ -956,6 +958,7 @@ export type Database = {
           api_url?: string
           api_token?: string
           instance_name?: string
+          instance_token?: string | null
           status?: string | null
           created_at?: string | null
           updated_at?: string | null
