@@ -40,12 +40,16 @@ async def receive_whatsapp_message(request: Request):
     except Exception:
         return {"status": "error", "message": "JSON inválido"}
 
-    event = body.get("event", "") or body.get("type", "")
+    event = (body.get("event", "") or body.get("type", "") or "").upper()
     message_data = body.get("data", body)
-    
-    # Normalização para uazapiGO/Evolution
-    # O evento pode ser 'messages.upsert', 'message', 'messages', etc.
-    accepted_events = ("messages.upsert", "message", "messages", "CHAT_MESSAGE")
+
+    # Normalização para uazapiGO/Evolution — comparação case-insensitive
+    # UAZAPI envia MESSAGES_UPSERT; Evolution API envia messages.upsert
+    accepted_events = (
+        "MESSAGES.UPSERT", "MESSAGES_UPSERT",
+        "MESSAGE", "MESSAGES",
+        "CHAT_MESSAGE", "SEND_MESSAGE",
+    )
     if event not in accepted_events and "instance" not in body:
         logger.info(f"Webhook ignorado: evento '{event}' não está na lista de aceitos")
         return {"status": "ignored", "reason": f"evento {event} não processado"}
@@ -246,6 +250,7 @@ async def receive_whatsapp_message(request: Request):
                             message=reply,
                         )
                         db.table("messages").insert({
+                            "conversation_id": conversation_id,
                             "client_id": client_id,
                             "content": reply,
                             "sender_type": "agent",
@@ -268,6 +273,18 @@ async def receive_whatsapp_message(request: Request):
         logger.error("Erro crítico ao processar webhook de %s: %s", phone, e)
         await alertar_dono(f"Erro no webhook WhatsApp\nNúmero: {phone}\nErro: {e}")
         return {"status": "error", "message": "erro interno ao processar mensagem"}
+
+
+@router.post("/uzapi/debug")
+async def debug_webhook(request: Request):
+    """Loga o payload bruto recebido da UAZAPI — útil para diagnosticar formato de eventos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = await request.body()
+        body = {"raw": body.decode()}
+    logger.info(f"[DEBUG WEBHOOK] payload={body}")
+    return {"status": "logged", "event": body.get("event") or body.get("type"), "keys": list(body.keys())}
 
 
 @router.post("/new-lead-notify")
