@@ -20,6 +20,7 @@ from core import logger
 from config import get_settings
 from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
+from whatsapp_router import router as whatsapp_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
 
@@ -138,6 +139,7 @@ app.add_middleware(
 # ─── Rotas ────────────────────────────────────────────────────────────
 app.include_router(webhooks_router)
 app.include_router(campaigns_router)
+app.include_router(whatsapp_router)
 
 
 @app.get("/")

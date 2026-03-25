@@ -125,6 +125,125 @@ class UazapiClient:
                 logger.error(f"Erro ao configurar webhook: {e}")
                 return {"error": str(e)}
 
+    # ─── Conversas e Mensagens ────────────────────────────────────────────
+
+    async def get_chats(self, api_url: str, instance_token: str, count: int = 50) -> list[dict]:
+        """
+        Retorna as últimas conversas da instância.
+        Endpoint UAZAPI GO: GET /chats
+        Header: token: <instance_token>
+        """
+        url = f"{api_url.rstrip('/')}/chats"
+        headers = {"token": instance_token}
+        params = {"count": count}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.get(url, headers=headers, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+                if isinstance(data, list):
+                    raw_chats = data
+                elif isinstance(data, dict):
+                    raw_chats = data.get("chats") or data.get("data") or []
+                else:
+                    raw_chats = []
+
+                return [self._normalize_chat(c) for c in raw_chats]
+
+            except httpx.HTTPStatusError as e:
+                logger.error("Erro HTTP ao buscar chats: %s — %s", e.response.status_code, e.response.text)
+                return []
+            except Exception as e:
+                logger.error("Erro ao buscar chats: %s", e)
+                return []
+
+    async def get_messages(self, api_url: str, instance_token: str, chat_id: str, count: int = 30) -> list[dict]:
+        """
+        Retorna as mensagens de uma conversa.
+        Endpoint UAZAPI GO: GET /messages/<chatId>
+        Header: token: <instance_token>
+        """
+        if "@" not in chat_id:
+            chat_id = f"{chat_id}@s.whatsapp.net"
+
+        url = f"{api_url.rstrip('/')}/messages/{chat_id}"
+        headers = {"token": instance_token}
+        params = {"count": count}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.get(url, headers=headers, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+                if isinstance(data, list):
+                    raw_msgs = data
+                elif isinstance(data, dict):
+                    raw_msgs = data.get("messages") or data.get("data") or []
+                else:
+                    raw_msgs = []
+
+                return [self._normalize_message(m) for m in raw_msgs]
+
+            except httpx.HTTPStatusError as e:
+                logger.error("Erro HTTP ao buscar mensagens de %s: %s — %s", chat_id, e.response.status_code, e.response.text)
+                return []
+            except Exception as e:
+                logger.error("Erro ao buscar mensagens de %s: %s", chat_id, e)
+                return []
+
+    def _normalize_chat(self, raw: dict) -> dict:
+        """Normaliza o objeto de chat da UAZAPI GO para formato padrão."""
+        jid = raw.get("id") or raw.get("jid") or raw.get("remoteJid") or ""
+        phone = jid.replace("@s.whatsapp.net", "").replace("@c.us", "")
+        return {
+            "id": jid,
+            "phone": phone,
+            "name": (
+                raw.get("name")
+                or raw.get("pushName")
+                or raw.get("notifyName")
+                or f"WhatsApp {phone[-4:]}"
+            ),
+            "last_message": (
+                raw.get("lastMessage") or raw.get("lastMsg") or raw.get("preview") or ""
+            ),
+            "last_message_at": (
+                raw.get("lastMessageAt") or raw.get("t") or raw.get("timestamp") or None
+            ),
+            "unread_count": raw.get("unreadCount") or raw.get("unread") or 0,
+            "is_group": "@g.us" in jid,
+        }
+
+    def _normalize_message(self, raw: dict) -> dict:
+        """Normaliza o objeto de mensagem da UAZAPI GO para formato padrão."""
+        key = raw.get("key", {})
+        msg_obj = raw.get("message", {}) or {}
+
+        if isinstance(msg_obj, str):
+            text = msg_obj
+        else:
+            text = (
+                msg_obj.get("conversation", "")
+                or msg_obj.get("extendedTextMessage", {}).get("text", "")
+                or msg_obj.get("imageMessage", {}).get("caption", "")
+                or msg_obj.get("videoMessage", {}).get("caption", "")
+                or raw.get("body", "")
+                or raw.get("text", "")
+                or ""
+            )
+
+        return {
+            "id": key.get("id") or raw.get("id") or "",
+            "from_me": key.get("fromMe", False) or raw.get("fromMe", False),
+            "text": text,
+            "timestamp": raw.get("messageTimestamp") or raw.get("t") or raw.get("timestamp"),
+            "status": raw.get("status") or raw.get("ack") or None,
+            "type": list(msg_obj.keys())[0] if msg_obj and isinstance(msg_obj, dict) else "text",
+        }
+
     # ─── Status da instância ──────────────────────────────────────────────
 
     async def get_instance_status(self, api_url: str, api_token: str, instance_name: str, instance_token: str | None = None) -> dict:
