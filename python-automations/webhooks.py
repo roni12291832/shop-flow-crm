@@ -194,44 +194,63 @@ async def receive_whatsapp_message(request: Request):
 
         # ─── 3. Salva Mensagem ────────────────────────────────────────────
         if not DRY_RUN:
-            db.table("messages").insert({
-                "conversation_id": conversation_id,
-                "client_id": client_id,
-                "content": message_text,
-                "sender_type": "cliente",
-                "channel": "whatsapp",
-                "is_from_client": True,
-            }).execute()
-        logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
+            try:
+                db.table("messages").insert({
+                    "conversation_id": conversation_id,
+                    "client_id": client_id,
+                    "content": message_text,
+                    "sender_type": "cliente",
+                    "channel": "whatsapp",
+                    "is_from_client": True,
+                }).execute()
+                logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
+            except Exception as e:
+                logger.error("Erro ao salvar mensagem (colunas faltando? rode a migration): %s", e)
+                # Tenta inserir só com colunas originais como fallback
+                try:
+                    db.table("messages").insert({
+                        "conversation_id": conversation_id,
+                        "content": message_text,
+                        "sender_type": "cliente",
+                    }).execute()
+                    logger.info("Mensagem salva (fallback sem colunas extras) para conversa %s", conversation_id)
+                except Exception as e2:
+                    logger.error("Fallback de mensagem também falhou: %s", e2)
 
         # ─── 4. Cria ou Atualiza Oportunidade (Pipeline) ─────────────────
         if is_new and not DRY_RUN:
-            db.table("opportunities").insert({
-                "title": f"Lead WhatsApp - {push_name or phone}",
-                "client_id": client_id,
-                "stage": "lead_novo",
-                "estimated_value": 0,
-            }).execute()
-            logger.info("Nova oportunidade criada no pipeline para %s", push_name)
+            try:
+                db.table("opportunities").insert({
+                    "title": f"Lead WhatsApp - {push_name or phone}",
+                    "client_id": client_id,
+                    "stage": "lead_novo",
+                    "estimated_value": 0,
+                }).execute()
+                logger.info("Nova oportunidade criada no pipeline para %s", push_name)
+            except Exception as e:
+                logger.warning("Erro ao criar oportunidade (stage inválido?): %s", e)
         elif not is_new:
-            active_opp_res = (
-                db.table("opportunities")
-                .select("id, stage")
-                .eq("client_id", client_id)
-                .in_("stage", ["lead_novo", "contato_iniciado"])
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if active_opp_res.data:
-                opp = active_opp_res.data[0]
-                try:
-                    is_interested = await jarvis.analyze_client_intent(message_text)
-                    if is_interested and not DRY_RUN:
-                        db.table("opportunities").update({"stage": "interessado"}).eq("id", opp["id"]).execute()
-                        logger.info("Oportunidade de %s atualizada para 'interessado' via IA", push_name)
-                except Exception as e:
-                    logger.warning("Erro ao analisar intenção do cliente via IA: %s", e)
+            try:
+                active_opp_res = (
+                    db.table("opportunities")
+                    .select("id, stage")
+                    .eq("client_id", client_id)
+                    .in_("stage", ["lead_novo", "contato_iniciado"])
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if active_opp_res.data:
+                    opp = active_opp_res.data[0]
+                    try:
+                        is_interested = await jarvis.analyze_client_intent(message_text)
+                        if is_interested and not DRY_RUN:
+                            db.table("opportunities").update({"stage": "interessado"}).eq("id", opp["id"]).execute()
+                            logger.info("Oportunidade de %s atualizada para 'interessado' via IA", push_name)
+                    except Exception as e:
+                        logger.warning("Erro ao analisar intenção do cliente via IA: %s", e)
+            except Exception as e:
+                logger.warning("Erro ao buscar/atualizar oportunidade: %s", e)
 
         # ─── 5. Resposta Automática via Jarvis ────────────────────────────
         try:
@@ -308,6 +327,34 @@ async def debug_webhook(request: Request):
         body = {"raw": body.decode()}
     logger.info(f"[DEBUG WEBHOOK] payload={body}")
     return {"status": "logged", "event": body.get("event") or body.get("type"), "keys": list(body.keys())}
+
+
+@router.get("/diagnostics")
+async def diagnostics():
+    """
+    Diagnóstico do sistema — verifica DB e mostra conversas existentes.
+    Acesse: GET /webhook/diagnostics
+    """
+    try:
+        db = get_supabase()
+        s = get_settings()
+
+        conv_res = db.table("conversations").select("id, status, last_message, last_message_at, client_id").order("created_at", desc=True).limit(10).execute()
+        client_res = db.table("clients").select("id, name, phone, origin").order("created_at", desc=True).limit(10).execute()
+        instances = db.table("whatsapp_instances").select("instance_name, status, api_url").execute()
+
+        return {
+            "status": "ok",
+            "dry_run": DRY_RUN,
+            "webhook_url": s.webhook_url,
+            "conversations_found": len(conv_res.data or []),
+            "conversations": conv_res.data,
+            "clients_found": len(client_res.data or []),
+            "clients": client_res.data,
+            "whatsapp_instances": instances.data,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @router.post("/new-lead-notify")
