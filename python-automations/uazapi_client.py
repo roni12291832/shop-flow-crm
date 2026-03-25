@@ -50,31 +50,23 @@ class UazapiClient:
                 return {"error": str(e)}
 
     async def set_webhook(self, api_url: str, api_token: str, instance_name: str, webhook_url: str, instance_token: str | None = None) -> dict:
-        """Configura a URL do webhook na instância da Evolution API."""
-        url = f"{api_url.rstrip('/')}/instance/webhook/{instance_name}"
+        """Configura a URL do webhook na UAZAPI GO."""
+        url = f"{api_url.rstrip('/')}/webhook"
+        token = instance_token or api_token
         headers = {
+            "token": token,
             "Content-Type": "application/json",
-            "apikey": api_token,
         }
-        if instance_token:
-            headers["token"] = instance_token
-            # Em uazapiGO o endpoint pode ser apenas /webhook
-            # Vamos tentar o padrão primeiro, se falhar o chamador trata
-            
         payload = {
-            "url": webhook_url,
             "enabled": True,
-            "events": [
-                "MESSAGES_UPSERT", 
-                "MESSAGES_UPDATE", 
-                "MESSAGES_DELETE", 
-                "SEND_MESSAGE",
-                "CONNECTION_UPDATE"
-            ]
+            "url": webhook_url,
+            "events": ["messages", "connection"],
+            "excludeMessages": ["wasSentByApi"],
         }
         async with httpx.AsyncClient(timeout=15) as client:
             try:
                 resp = await client.post(url, json=payload, headers=headers)
+                logger.info(f"Webhook configurado (status {resp.status_code}): {resp.text[:200]}")
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao configurar webhook: {e}")

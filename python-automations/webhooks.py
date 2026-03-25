@@ -26,6 +26,35 @@ PIPELINE_STAGES = [
 ]
 
 
+@router.post("/setup")
+async def setup_webhook_now(request: Request):
+    """
+    Força a configuração do webhook no UAZAPI agora.
+    Útil após deploy sem precisar reconectar o WhatsApp.
+    """
+    from supabase_client import get_supabase
+    s = get_settings()
+    if not s.webhook_url:
+        return {"status": "error", "message": "WEBHOOK_URL não configurado nas env vars"}
+
+    db = get_supabase()
+    instances = db.table("whatsapp_instances").select("*").execute()
+    if not instances.data:
+        return {"status": "error", "message": "Nenhuma instância WhatsApp encontrada"}
+
+    results = []
+    for inst in instances.data:
+        result = await uazapi.set_webhook(
+            inst["api_url"], inst["api_token"],
+            inst["instance_name"], s.webhook_url,
+            inst.get("instance_token"),
+        )
+        results.append({"instance": inst["instance_name"], "result": result})
+        logger.info(f"Webhook forçado para '{inst['instance_name']}': {result}")
+
+    return {"status": "ok", "results": results}
+
+
 @router.post("/uzapi")
 async def receive_whatsapp_message(request: Request):
     """
@@ -40,19 +69,20 @@ async def receive_whatsapp_message(request: Request):
     except Exception:
         return {"status": "error", "message": "JSON inválido"}
 
+    # Log TUDO que chega para facilitar diagnóstico
+    logger.info(f"[WEBHOOK RECEBIDO] keys={list(body.keys())} event={body.get('event')} type={body.get('type')}")
+
     event = (body.get("event", "") or body.get("type", "") or "").upper()
     message_data = body.get("data", body)
 
-    # Normalização para uazapiGO/Evolution — comparação case-insensitive
-    # UAZAPI envia MESSAGES_UPSERT; Evolution API envia messages.upsert
-    accepted_events = (
-        "MESSAGES.UPSERT", "MESSAGES_UPSERT",
-        "MESSAGE", "MESSAGES",
-        "CHAT_MESSAGE", "SEND_MESSAGE",
-    )
-    if event not in accepted_events and "instance" not in body:
-        logger.info(f"Webhook ignorado: evento '{event}' não está na lista de aceitos")
-        return {"status": "ignored", "reason": f"evento {event} não processado"}
+    # UAZAPI GO envia event: "messages" ou event: "connection"
+    # Aceita qualquer evento que contenha "message" no nome
+    accepted_events = ("MESSAGES", "MESSAGE")
+    is_connection_event = "CONNECTION" in event or "CONNECT" in event
+
+    if event not in accepted_events and not is_connection_event and "instance" not in body:
+        logger.info(f"Webhook ignorado: evento '{event}'")
+        return {"status": "ignored", "reason": f"evento {event} não é mensagem"}
 
     logger.info(f"Webhook recebido: evento={event} | data_type={type(message_data)}")
 
