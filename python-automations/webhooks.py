@@ -13,7 +13,7 @@ Formato esperado da UAZAPI GO:
   }
 }
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 
@@ -173,7 +173,7 @@ async def receive_whatsapp_message(request: Request):
             if not DRY_RUN:
                 db.table("conversations").update({
                     "last_message": message_text[:100],
-                    "last_message_at": datetime.utcnow().isoformat(),
+                    "last_message_at": datetime.now(timezone.utc).isoformat(),
                     "status": "aguardando",
                 }).eq("id", conversation_id).execute()
         else:
@@ -185,7 +185,7 @@ async def receive_whatsapp_message(request: Request):
                     "client_id": client_id,
                     "status": "aberta",
                     "last_message": message_text[:100],
-                    "last_message_at": datetime.utcnow().isoformat(),
+                    "last_message_at": datetime.now(timezone.utc).isoformat(),
                 }).execute()
                 if not insert_conv.data:
                     logger.error("Erro ao criar conversa: %s", insert_conv)
@@ -398,7 +398,7 @@ async def notify_new_lead(request: Request):
             f"👤 Nome: {client_name}\n"
             f"📱 Telefone: {client_phone}\n"
             f"📍 Origem: {origin}\n"
-            f"⏰ Hora: {datetime.utcnow().strftime('%H:%M')}\n\n"
+            f"⏰ Hora: {datetime.now(timezone.utc).strftime('%H:%M')}\n\n"
             f"*Acesse o CRM para acompanhar!*"
         )
 

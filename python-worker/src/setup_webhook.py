@@ -1,6 +1,5 @@
 import asyncio
 import os
-import sys
 from dotenv import load_dotenv
 
 # Path to the .env inside python-automations
@@ -17,6 +16,11 @@ async def setup():
         print("❌ Supabase URL/Key Missing")
         return
 
+    webhook_url = os.environ.get('WEBHOOK_URL')
+    if not webhook_url:
+        print("❌ WEBHOOK_URL não configurada no .env")
+        return
+
     supabase = create_client(url, key)
     res = supabase.table('whatsapp_instances').select('*').limit(1).execute()
     if not res.data:
@@ -27,11 +31,10 @@ async def setup():
     api_url = inst['api_url']
     api_token = inst['api_token']
     instance_name = inst['instance_name']
-    
-    webhook_url = 'https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi'
-    
+    instance_token = inst.get('instance_token')
+
     print(f"🚀 Setting Webhook to {webhook_url} for instance '{instance_name}'...")
-    r = await uazapi.set_webhook(api_url, api_token, instance_name, webhook_url)
+    r = await uazapi.set_webhook(api_url, api_token, instance_name, webhook_url, instance_token)
     print(f"✅ Result: {r}")
 
 if __name__ == "__main__":

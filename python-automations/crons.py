@@ -3,7 +3,7 @@ from __future__ import annotations
 Rotinas agendadas (Cron Jobs).
 Substitui os fluxos N8N 07 (relatório diário) e 09 (sync mensagens).
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core import logger, DRY_RUN, registrar_automacao, alertar_dono
 from supabase_client import get_supabase
@@ -73,26 +73,29 @@ async def job_sync_offline_messages():
         db = get_supabase()
         instance_res = (
             db.table("whatsapp_instances")
-            .select("api_url, api_token, instance_name")
+            .select("api_url, api_token, instance_token, instance_name")
             .eq("status", "connected")
             .limit(1)
             .execute()
         )
         if not instance_res.data:
-            logger.warning("Sem instância WhatsApp com status='open' para sync")
+            logger.warning("Sem instância WhatsApp conectada para sync")
             return
 
         inst = instance_res.data[0]
+        token = inst.get("instance_token") or inst["api_token"]
+
         chats = await uazapi.get_chats(
             api_url=inst["api_url"],
-            api_token=inst["api_token"],
-            instance_name=inst["instance_name"],
+            instance_token=token,
             count=30,
         )
 
         synced_count = 0
+        inserted_count = 0
+
         for chat in chats:
-            phone = str(chat.get("id", "")).replace("@s.whatsapp.net", "").replace("@c.us", "")
+            phone = chat.get("phone", "")
             if not phone or len(phone) < 10:
                 continue
 
@@ -101,6 +104,8 @@ async def job_sync_offline_messages():
                 continue
 
             client_id = client_res.data[0]["id"]
+
+            # Busca última mensagem salva no Supabase para este cliente
             last_msg_res = (
                 db.table("messages")
                 .select("created_at")
@@ -110,10 +115,88 @@ async def job_sync_offline_messages():
                 .execute()
             )
             last_ts = last_msg_res.data[0].get("created_at") if last_msg_res.data else None
-            logger.debug("Sync check para %s: última msg em %s", phone, last_ts)
+
+            # Busca mensagens do WhatsApp para este chat
+            chat_jid = chat.get("id", "")
+            if not chat_jid:
+                continue
+
+            wa_messages = await uazapi.get_messages(
+                api_url=inst["api_url"],
+                instance_token=token,
+                chat_id=chat_jid,
+                count=20,
+            )
+
+            if not wa_messages:
+                continue
+
+            # Busca ou cria conversa aberta para este cliente
+            conv_res = (
+                db.table("conversations")
+                .select("id")
+                .eq("client_id", client_id)
+                .in_("status", ["aberta", "em_atendimento", "aguardando"])
+                .order("last_message_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            conversation_id = conv_res.data[0]["id"] if conv_res.data else None
+
+            if not conversation_id:
+                # Cria conversa se não existe
+                try:
+                    conv_insert = db.table("conversations").insert({
+                        "client_id": client_id,
+                        "status": "aberta",
+                        "last_message": wa_messages[-1].get("text", "")[:100] if wa_messages else "",
+                        "last_message_at": datetime.now(timezone.utc).isoformat(),
+                    }).execute()
+                    if conv_insert.data:
+                        conversation_id = conv_insert.data[0]["id"]
+                except Exception as e:
+                    logger.warning("Erro ao criar conversa para sync de %s: %s", phone, e)
+                    continue
+
+            # Insere mensagens que não existem ainda no Supabase
+            for msg in wa_messages:
+                msg_text = msg.get("text", "")
+                if not msg_text:
+                    continue
+
+                # Converte timestamp UAZAPI para datetime
+                ts = msg.get("timestamp")
+                if isinstance(ts, (int, float)):
+                    msg_time = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                elif isinstance(ts, str):
+                    msg_time = ts
+                else:
+                    msg_time = datetime.now(timezone.utc).isoformat()
+
+                # Pula se a mensagem é anterior à última salva
+                if last_ts and msg_time <= last_ts:
+                    continue
+
+                try:
+                    if not DRY_RUN:
+                        db.table("messages").insert({
+                            "conversation_id": conversation_id,
+                            "client_id": client_id,
+                            "content": msg_text,
+                            "sender_type": "atendente" if msg.get("from_me") else "cliente",
+                            "channel": "whatsapp",
+                            "is_from_client": not msg.get("from_me", False),
+                        }).execute()
+                        inserted_count += 1
+                except Exception as e:
+                    logger.debug("Erro ao inserir msg sync para %s: %s", phone, e)
+
             synced_count += 1
 
-        logger.info("Sync concluído: %d conversas verificadas", synced_count)
+        logger.info(
+            "Sync concluído: %d conversas verificadas, %d mensagens inseridas",
+            synced_count, inserted_count,
+        )
 
 
 async def job_notify_stale_leads():
@@ -125,7 +208,7 @@ async def job_notify_stale_leads():
         logger.info("Verificando leads parados...")
 
         db = get_supabase()
-        cutoff = (datetime.utcnow() - timedelta(days=3)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
 
         stale_res = (
             db.table("opportunities")
