@@ -1,8 +1,14 @@
 from __future__ import annotations
 """
 Rotas da aba WhatsApp — listagem de conversas e mensagens.
-Consome a UAZAPI GO e enriquece com dados do Supabase.
+Consome a UAZAPI GO V2 e enriquece com dados do Supabase.
+
+CORREÇÕES v2:
+- Usa os métodos corrigidos do uazapi_client (POST /chat/find, POST /message/find)
+- Adicionado endpoint de diagnóstico GET /whatsapp/debug para facilitar troubleshooting
+- Sort key corrigido para lidar com timestamp int e string
 """
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -31,11 +37,65 @@ def _get_active_instance() -> dict:
     return res.data[0]
 
 
+# ─── Debug / Diagnóstico ──────────────────────────────────────────────────────
+
+@router.get("/debug")
+async def debug_whatsapp():
+    """
+    Endpoint de diagnóstico — verifica a conexão com a UAZAPI GO V2 e
+    retorna o status da instância e uma amostra de chats brutos.
+    Útil para verificar se os endpoints estão corretos.
+    """
+    try:
+        instance = _get_active_instance()
+    except HTTPException as e:
+        return {"error": str(e.detail), "instance": None}
+
+    # Testa status da instância
+    status = await uazapi.get_instance_status(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        instance_name=instance.get("instance_name", ""),
+        instance_token=instance.get("instance_token"),
+    )
+
+    # Testa busca de chats (retorna raw para diagnóstico)
+    raw_chats_sample = None
+    raw_error = None
+    try:
+        url = f"{instance['api_url'].rstrip('/')}/chat/find"
+        headers = {
+            "token": instance["instance_token"],
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(url, json={"count": 5}, headers=headers)
+            raw_chats_sample = {
+                "status_code": resp.status_code,
+                "response_preview": str(resp.text[:500]),
+            }
+    except Exception as e:
+        raw_error = str(e)
+
+    return {
+        "instance_config": {
+            "api_url": instance["api_url"],
+            "instance_name": instance.get("instance_name"),
+            "has_instance_token": bool(instance.get("instance_token")),
+        },
+        "instance_status": status,
+        "chat_find_test": raw_chats_sample,
+        "chat_find_error": raw_error,
+    }
+
+
+# ─── Conversas ────────────────────────────────────────────────────────────────
+
 @router.get("/conversations")
 async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
     """
     Lista as últimas conversas do WhatsApp conectado.
-    Busca na UAZAPI GO e enriquece com nomes do CRM.
+    Busca na UAZAPI GO V2 (POST /chat/find) e enriquece com nomes do CRM.
     """
     instance = _get_active_instance()
 
@@ -44,6 +104,8 @@ async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
         instance_token=instance["instance_token"],
         count=count,
     )
+
+    logger.info(f"get_chats retornou {len(chats)} conversas")
 
     if not chats:
         return {"conversations": [], "total": 0}
@@ -72,15 +134,28 @@ async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
     for chat in chats:
         phone = chat.get("phone", "")
         crm_data = crm_map.get(phone, {})
-        enriched.append({
-            **chat,
-            "name": crm_data.get("crm_name") or chat.get("name"),
-            "crm_client_id": crm_data.get("crm_client_id"),
-        })
+        enriched.append(
+            {
+                **chat,
+                "name": crm_data.get("crm_name") or chat.get("name"),
+                "crm_client_id": crm_data.get("crm_client_id"),
+            }
+        )
 
-    enriched.sort(key=lambda x: x.get("last_message_at") or 0, reverse=True)
+    # Ordena por timestamp (suporta int e string ISO)
+    def _sort_ts(x):
+        ts = x.get("last_message_at")
+        if ts is None:
+            return 0
+        if isinstance(ts, (int, float)):
+            return ts
+        return str(ts)  # ISO string ordena lexicograficamente
+
+    enriched.sort(key=_sort_ts, reverse=True)
     return {"conversations": enriched, "total": len(enriched)}
 
+
+# ─── Mensagens de uma conversa ────────────────────────────────────────────────
 
 @router.get("/conversations/{chat_id}/messages")
 async def get_conversation_messages(
@@ -89,22 +164,27 @@ async def get_conversation_messages(
 ):
     """
     Retorna mensagens de uma conversa.
-    Mescla mensagens da UAZAPI GO com histórico salvo no Supabase.
+    Mescla mensagens da UAZAPI GO V2 (POST /message/find) com histórico do Supabase.
     """
     instance = _get_active_instance()
 
     full_jid = chat_id if "@" in chat_id else f"{chat_id}@s.whatsapp.net"
-    phone = full_jid.replace("@s.whatsapp.net", "").replace("@c.us", "")
+    phone = (
+        full_jid.replace("@s.whatsapp.net", "")
+        .replace("@c.us", "")
+        .replace("@lid", "")
+    )
 
-    # 1. Mensagens do WhatsApp (UAZAPI GO)
+    # 1. Mensagens do WhatsApp (UAZAPI GO V2 — POST /message/find)
     wa_messages = await uazapi.get_messages(
         api_url=instance["api_url"],
         instance_token=instance["instance_token"],
         chat_id=full_jid,
         count=count,
     )
+    logger.info(f"get_messages({full_jid}) retornou {len(wa_messages)} mensagens")
 
-    # 2. Mensagens salvas no Supabase (enviadas pelo Jarvis ou agente)
+    # 2. Mensagens salvas no Supabase (enviadas pelo agente/Jarvis)
     crm_messages: list[dict] = []
     try:
         db = get_supabase()
@@ -126,27 +206,31 @@ async def get_conversation_messages(
                 .execute()
             )
             for m in msg_res.data or []:
-                crm_messages.append({
-                    "id": f"crm-{m['id']}",
-                    "from_me": not m.get("is_from_client", True),
-                    "text": m.get("content", ""),
-                    "timestamp": m.get("created_at"),
-                    "source": "crm",
-                    "sender_type": m.get("sender_type"),
-                })
+                crm_messages.append(
+                    {
+                        "id": f"crm-{m['id']}",
+                        "from_me": not m.get("is_from_client", True),
+                        "text": m.get("content", ""),
+                        "timestamp": m.get("created_at"),
+                        "source": "crm",
+                        "sender_type": m.get("sender_type"),
+                    }
+                )
     except Exception as e:
         logger.warning("Erro ao buscar histórico do CRM: %s", e)
 
     # 3. Mescla e ordena por timestamp
     all_messages = [{**m, "source": "whatsapp"} for m in wa_messages] + crm_messages
 
-    def sort_key(m):
+    def _sort_key(m):
         ts = m.get("timestamp")
-        if isinstance(ts, str):
+        if ts is None:
+            return 0
+        if isinstance(ts, (int, float)):
             return ts
-        return ts or 0
+        return str(ts)
 
-    all_messages.sort(key=sort_key)
+    all_messages.sort(key=_sort_key)
 
     return {
         "chat_id": full_jid,
@@ -155,6 +239,8 @@ async def get_conversation_messages(
         "total": len(all_messages),
     }
 
+
+# ─── Envio manual ─────────────────────────────────────────────────────────────
 
 class SendMessageBody(BaseModel):
     chat_id: str
@@ -168,12 +254,16 @@ async def send_message(body: SendMessageBody):
         raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia")
 
     instance = _get_active_instance()
-    phone = body.chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "")
+    phone = (
+        body.chat_id.replace("@s.whatsapp.net", "")
+        .replace("@c.us", "")
+        .replace("@lid", "")
+    )
 
     result = await uazapi.send_text(
         api_url=instance["api_url"],
         api_token=instance["api_token"],
-        instance_name=instance["instance_name"],
+        instance_name=instance.get("instance_name", ""),
         phone=phone,
         message=body.message,
         instance_token=instance.get("instance_token"),
@@ -193,13 +283,15 @@ async def send_message(body: SendMessageBody):
             .execute()
         )
         if client_res.data:
-            db.table("messages").insert({
-                "client_id": client_res.data[0]["id"],
-                "content": body.message,
-                "sender_type": "agent",
-                "channel": "whatsapp",
-                "is_from_client": False,
-            }).execute()
+            db.table("messages").insert(
+                {
+                    "client_id": client_res.data[0]["id"],
+                    "content": body.message,
+                    "sender_type": "agent",
+                    "channel": "whatsapp",
+                    "is_from_client": False,
+                }
+            ).execute()
     except Exception as e:
         logger.warning("Mensagem enviada mas não salva no CRM: %s", e)
 
