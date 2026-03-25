@@ -1,18 +1,27 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, QrCode, Wifi, WifiOff, RefreshCw, Save, AlertTriangle } from "lucide-react";
+import { Smartphone, QrCode, Wifi, WifiOff, RefreshCw, Save, AlertTriangle, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
+/**
+ * URL do webhook do backend Python.
+ * Lida pelo banco de dados (whatsapp_instances.webhook_url) ou por variável de ambiente.
+ * Fallback para o deploy atual no Koyeb.
+ */
+const DEFAULT_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
+
 export default function WhatsAppConnect() {
-  const {  hasRole } = useAuth();
+  const navigate = useNavigate();
+  const { hasRole } = useAuth();
   const isAdmin = hasRole("admin");
   const [apiUrl, setApiUrl] = useState("https://nexaflow.uazapi.com");
-  const [apiToken, setApiToken] = useState("z6hUzjbsDoZKwYzUr3l8rRbDavfG6tgr55ifG4IdIl82w2cSfY");
+  const [apiToken, setApiToken] = useState("");
   const [instanceName, setInstanceName] = useState("");
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
@@ -20,29 +29,28 @@ export default function WhatsAppConnect() {
   const [saved, setSaved] = useState(false);
   const [dbRecordId, setDbRecordId] = useState<string | null>(null);
   const [instanceToken, setInstanceToken] = useState<string>("");
+  const [webhookUrl, setWebhookUrl] = useState(DEFAULT_WEBHOOK_URL);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
   const addLog = (msg: string, data?: any) => {
-    const logStr = data ? `${msg} | Data: ${JSON.stringify(data)}` : msg;
+    const logStr = data ? `${msg} | ${JSON.stringify(data).slice(0, 300)}` : msg;
     console.log("[WA-DEBUG]", logStr);
-    setDebugLogs(prev => [...prev, logStr]);
+    setDebugLogs(prev => [...prev.slice(-80), logStr]);
   };
 
   // Load saved config from DB
   useEffect(() => {
     const fetchConfig = async () => {
-            
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("whatsapp_instances")
         .select("*")
-        
         .maybeSingle();
 
       if (data) {
         setDbRecordId(data.id);
-        setApiUrl(data.api_url);
-        setApiToken(data.api_token);
-        setInstanceName(data.instance_name);
+        setApiUrl(data.api_url || "https://nexaflow.uazapi.com");
+        setApiToken(data.api_token || "");
+        setInstanceName(data.instance_name || "");
         setInstanceToken(data.instance_token || "");
         setStatus((data.status as any) || "disconnected");
         setSaved(true);
@@ -56,9 +64,9 @@ export default function WhatsAppConnect() {
       toast.error("Preencha todos os campos");
       return;
     }
-    
+
     setLoading(true);
-    
+
     let error;
     if (dbRecordId) {
       const res = await supabase.from("whatsapp_instances").update({
@@ -82,21 +90,21 @@ export default function WhatsAppConnect() {
     }
 
     setLoading(false);
-    
+
     if (error) {
       toast.error("Erro ao salvar no banco");
       console.error(error);
       return;
     }
-    
+
     setSaved(true);
-    toast.success("Configuração salva no banco de dados!");
+    toast.success("Configuração salva!");
   };
 
   const updateStatusInDb = async (newStatus: string, tokenToSave?: string) => {
     const updateData: any = { status: newStatus };
     if (tokenToSave) updateData.instance_token = tokenToSave;
-    
+
     if (dbRecordId) {
       await supabase.from("whatsapp_instances").update(updateData).eq("id", dbRecordId);
     }
@@ -105,11 +113,10 @@ export default function WhatsAppConnect() {
   };
 
   const isOpen = (data: any): boolean => {
-    // Formato uazapiGO (Data.connected === true ou Data.status.connected === true)
     if (data?.connected === true) return true;
     if (data?.instance?.connected === true) return true;
     if (data?.status?.connected === true) return true;
-    
+
     const state =
       data?.instance?.state ||
       data?.instance?.status ||
@@ -122,11 +129,11 @@ export default function WhatsAppConnect() {
     if (!apiUrl || !apiToken || !instanceName) return;
     setLoading(true);
     setDebugLogs([]);
-    addLog(`Verificando status da instância: ${instanceName}`);
+    addLog(`Verificando status: ${instanceName}`);
 
     const attempts = [
       {
-        label: "uazapiGO: status + token header",
+        label: "UAZAPI GO: /instance/status + token",
         url: `${apiUrl}/instance/status`,
         headers: { "token": instanceToken || apiToken },
       },
@@ -136,7 +143,7 @@ export default function WhatsAppConnect() {
         headers: { "apikey": apiToken },
       },
       {
-        label: "status + apikey",
+        label: "status/{name} + apikey",
         url: `${apiUrl}/instance/status/${instanceName}`,
         headers: { "apikey": apiToken },
       },
@@ -144,33 +151,65 @@ export default function WhatsAppConnect() {
 
     for (const attempt of attempts) {
       try {
-        addLog(`Tentando [${attempt.label}]: GET ${attempt.url}`);
+        addLog(`[${attempt.label}] GET ${attempt.url}`);
         const res = await fetch(attempt.url, { headers: attempt.headers });
-        addLog(`HTTP ${res.status}`);
         const text = await res.text();
-        addLog(`Resposta: ${text}`);
+        addLog(`HTTP ${res.status}: ${text.slice(0, 200)}`);
 
         if (res.ok) {
           const data = JSON.parse(text);
           if (isOpen(data)) {
-            addLog(`Conectado detectado via [${attempt.label}]!`);
+            addLog(`Conectado via [${attempt.label}]`);
             await updateStatusInDb("connected");
             setQrCode(null);
             toast.success("WhatsApp conectado!");
             setLoading(false);
             return;
           }
-          addLog(`Estado não reconhecido como conectado. JSON: ${JSON.stringify(data)}`);
         }
       } catch (e: any) {
-        addLog(`Erro em [${attempt.label}]: ${e.message}`);
+        addLog(`Erro [${attempt.label}]: ${e.message}`);
       }
     }
 
-    addLog("Nenhum endpoint retornou estado 'open' ou 'connected'. Veja os logs acima.");
+    addLog("Nenhum endpoint retornou conectado.");
     await updateStatusInDb("disconnected");
-    toast.error("WhatsApp não reconhecido como conectado. Veja os logs abaixo.");
+    toast.error("WhatsApp não conectado. Veja os logs.");
     setLoading(false);
+  };
+
+  const configureWebhook = async (token: string) => {
+    if (!webhookUrl) {
+      addLog("[Webhook] URL do webhook não configurada — pulando configuração automática");
+      return;
+    }
+
+    try {
+      addLog(`[Webhook] Configurando: ${webhookUrl}`);
+      const res = await fetch(`${apiUrl}/webhook`, {
+        method: "POST",
+        headers: {
+          "token": token,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          enabled: true,
+          url: webhookUrl,
+          events: ["messages", "connection"],
+          excludeMessages: ["wasSentByApi"]
+        })
+      });
+
+      if (res.ok) {
+        addLog("[Webhook] Configurado com sucesso!");
+        toast.success("Integração de mensagens ativada!");
+      } else {
+        const errText = await res.text();
+        addLog(`[Webhook] Falha (${res.status}): ${errText}`);
+      }
+    } catch (e: any) {
+      addLog(`[Webhook] Erro: ${e.message}`);
+    }
   };
 
   const generateQR = async () => {
@@ -179,206 +218,141 @@ export default function WhatsAppConnect() {
       return;
     }
     setLoading(true);
-    setDebugLogs([]); // Clear previous logs
-    addLog(`Iniciando geração de QR para a instância: ${instanceName}`);
-    
-    // Auto-save/update config if needed before generating QR
-    if (!dbRecordId || saved === false) {
+    setDebugLogs([]);
+    addLog(`Gerando QR para: ${instanceName}`);
+
+    if (!dbRecordId || !saved) {
       await saveConfig();
     }
 
     await updateStatusInDb("connecting");
     try {
-      const headers = {
-        "apikey": apiToken,
-        "Content-Type": "application/json",
-      };
-
-      addLog(`[STEP 1] POST /instance/init com nome: ${instanceName}`);
-      // --- STEP 1: INITIALIZE INSTANCE ---
+      // STEP 1: Initialize instance
+      addLog("[STEP 1] POST /instance/init");
       const createRes = await fetch(`${apiUrl}/instance/init`, {
         method: "POST",
         headers: {
-          ...headers,
-          "admintoken": apiToken
+          "Content-Type": "application/json",
+          "apikey": apiToken,
+          "admintoken": apiToken,
         },
         body: JSON.stringify({ name: instanceName }),
       });
-      
-      const statusText1 = createRes.status;
-      addLog(`[STEP 1] Init HTTP Status: ${statusText1}`);
+
+      addLog(`[STEP 1] HTTP ${createRes.status}`);
 
       if (createRes.status === 401 || createRes.status === 403) {
-        throw new Error("Token da API inválido (Verifique o admintoken no painel)");
+        throw new Error("Token inválido (verifique admintoken)");
       }
 
       let createData: any = {};
       if (createRes.ok) {
         const textData = await createRes.text();
-        try { createData = JSON.parse(textData); } catch(e) {}
-        addLog("[STEP 1] Instância Criada/Iniciada", createData);
+        try { createData = JSON.parse(textData); } catch {}
+        addLog("[STEP 1] OK", createData);
       } else if (createRes.status !== 409 && createRes.status !== 400) {
         const errText = await createRes.text().catch(() => "");
-        addLog(`[STEP 1] Erro do Servidor`, errText);
-        throw new Error(`Erro ${createRes.status} no servidor ao criar conexão`);
+        addLog(`[STEP 1] Erro`, errText);
+        throw new Error(`Erro ${createRes.status} ao criar instância`);
       }
 
-      // Tenta achar o token da instância (padrão v2 UAZAPI)
-      // Pode vir em createData.instance.token, createData.hash.token, ou ser a propria global apikey
-      const currentInstanceToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
-      addLog(`[Token] Usando token da instância: ${currentInstanceToken ? currentInstanceToken.substring(0,8) + '...' : 'Vazio'}`);
-      setInstanceToken(currentInstanceToken);
+      const currentToken = createData?.instance?.token || createData?.hash?.token || createData?.token || apiToken;
+      addLog(`[Token] ${currentToken.substring(0, 8)}...`);
+      setInstanceToken(currentToken);
 
       await new Promise(resolve => setTimeout(resolve, 1500));
 
-      // --- STEP 2: CONNECT INSTANCE & POLLING FOR QR CODE ---
+      // STEP 2: Connect and get QR
+      addLog("[STEP 2] POST /instance/connect");
       let connectData: any = null;
-
-      addLog(`[STEP 2] POST /instance/connect`);
-      // Chama POST /instance/connect para iniciar a Engine do WhatsApp na UAZAPI
       try {
-        const res = await fetch(`${apiUrl}/instance/connect`, { 
-          method: "POST", 
+        const res = await fetch(`${apiUrl}/instance/connect`, {
+          method: "POST",
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "token": currentInstanceToken,
+            "token": currentToken,
             "admintoken": apiToken,
-            "apikey": apiToken
+            "apikey": apiToken,
           },
-          body: JSON.stringify({ "base64": true })
+          body: JSON.stringify({ base64: true }),
         });
         const connText = await res.text();
-        addLog(`[STEP 2] Response Status: ${res.status}`);
+        addLog(`[STEP 2] HTTP ${res.status}`);
         try {
           connectData = JSON.parse(connText);
-          addLog("[STEP 2] Connect Data", connectData);
-        } catch(e) {
-          addLog(`[STEP 2] Resposta Não-JSON`, connText);
+          addLog("[STEP 2] Data", connectData);
+        } catch {
+          addLog("[STEP 2] Resposta não-JSON", connText);
         }
-      } catch(e: any) {
-        addLog(`[STEP 2] Falha na requisição fetch: ${e.message}`, e);
+      } catch (e: any) {
+        addLog(`[STEP 2] Fetch falhou: ${e.message}`);
       }
 
       const hasQr = (d: any) => d?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
+      const extractQr = (d: any) => d?.base64 || d?.qrcode?.base64 || d?.qrcode || d?.instance?.qrcode || d?.instance?.base64;
 
-      // Se a resposta imediata trouxer o QR Code, já exibe na tela
       let foundQr = hasQr(connectData);
       if (foundQr) {
-        addLog(`[Polling] QR Code encontrado instantaneamente no passo 2!`);
-        const qrString = connectData?.base64 || connectData?.qrcode?.base64 || connectData?.qrcode || connectData?.instance?.qrcode || connectData?.instance?.base64;
-        setQrCode(qrString);
+        addLog("[QR] Encontrado imediatamente!");
+        setQrCode(extractQr(connectData));
         toast.success("QR Code gerado! Escaneie com o WhatsApp");
       }
 
-      let maxAttempts = 60; // 60 tentativas x 2 segundos = 120 segundos (~2 minutos para scannear)
+      // STEP 3: Poll for connection
+      let maxAttempts = 60;
       let isConnected = isOpen(connectData);
+      addLog("[Polling] Monitorando conexão (até 120s)...");
 
-      addLog(`[Polling] Iniciando monitoramento da conexão (Até 120s)...`);
-
-      // Fica verificando o status da conexão até que a pessoa escaneie e conecte (ou dê timeout)
       while (!isConnected && maxAttempts > 0) {
-        addLog(`[Polling] Aguardando 2s (Tentativas restantes: ${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, 2000));
         maxAttempts--;
         try {
-          // Tenta primeiro o endpoint sugerido pelo diagnóstico: /instance/status com token
           const statusRes = await fetch(`${apiUrl}/instance/status`, {
-            method: "GET",
             headers: {
               "Accept": "application/json",
-              "token": currentInstanceToken || apiToken,
+              "token": currentToken || apiToken,
             }
           });
           const textRes = await statusRes.text();
-          addLog(`[Polling] Status Req HTTP: ${statusRes.status}`, textRes);
 
           if (statusRes.ok) {
             try {
               const statusData = JSON.parse(textRes);
               if (isOpen(statusData)) {
-                connectData = statusData;
                 isConnected = true;
-                addLog(`[Polling] Conexão detectada — WhatsApp conectado com SUCESSO!`);
+                addLog("[Polling] CONECTADO!");
                 break;
               } else if (!foundQr && hasQr(statusData)) {
-                // Se ainda não tínhamos o QR e ele apareceu agora, mostra na tela
                 foundQr = true;
-                connectData = statusData;
-                const qrString = statusData?.base64 || statusData?.qrcode?.base64 || statusData?.qrcode || statusData?.instance?.qrcode || statusData?.instance?.base64;
-                setQrCode(qrString);
+                setQrCode(extractQr(statusData));
                 toast.success("QR Code gerado! Escaneie com o WhatsApp");
-                addLog(`[Polling] QR Code recebido com sucesso no polling!`);
+                addLog("[Polling] QR recebido");
               }
-            } catch(e) {}
+            } catch {}
           }
-        } catch(e: any) {
-          addLog(`[Polling] Erro HTTP no status: ${e.message}`);
+        } catch (e: any) {
+          addLog(`[Polling] Erro: ${e.message}`);
         }
       }
 
       if (isConnected) {
-        addLog(`[ProcessQR] Instância conectada!`);
-        await updateStatusInDb("connected", currentInstanceToken);
+        addLog("Instância conectada com sucesso!");
+        await updateStatusInDb("connected", currentToken);
         setQrCode(null);
         toast.success("WhatsApp conectado com sucesso!");
-        
-        // --- AUTO CONFIGURAÇÃO DE WEBHOOK (UAZAPI v2) ---
-        try {
-          addLog("[Webhook] Iniciando configuração automática v2...");
-          const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
 
-          // UAZAPI v2 usa POST /webhook com o 'token' da instância
-          const url = `${apiUrl}/webhook`;
-          addLog(`[Webhook] Configurando via POST ${url}`);
-          
-          const res = await fetch(url, {
-            method: "POST",
-            headers: {
-              "token": currentInstanceToken || apiToken,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              enabled: true,
-              url: webhookUrl,
-              events: ["messages", "connection"],
-              excludeMessages: ["wasSentByApi"]
-            })
-          });
-          
-          if (res.ok) {
-            addLog(`[Webhook] ✅ Configurado com sucesso!`);
-            toast.success("Integração de mensagens ativada!");
-          } else {
-            const errText = await res.text();
-            addLog(`[Webhook] ❌ Falha (${res.status}): ${errText}`);
-            // Fallback para outros endpoints caso seja versão antiga
-            const fallbackEndpoints = [
-              `${apiUrl}/webhook/instance/${instanceName}`,
-              `${apiUrl}/instance/webhook/${instanceName}`,
-            ];
-            for (const fUrl of fallbackEndpoints) {
-                const fRes = await fetch(fUrl, {
-                    method: "POST",
-                    headers: { "apikey": apiToken, "Content-Type": "application/json" },
-                    body: JSON.stringify({ url: webhookUrl, enabled: true, events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"] })
-                });
-                if (fRes.ok) { addLog(`[Webhook] ✅ Configurado via fallback: ${fUrl}`); break; }
-            }
-          }
-        } catch (e: any) {
-          addLog(`[Webhook] Erro crítico na configuração: ${e.message}`);
-        }
+        // Auto-configure webhook
+        await configureWebhook(currentToken);
       } else {
-        addLog(`[ProcessQR] Tempo esgotado para escanear o QR Code.`);
-        updateStatusInDb("disconnected");
-        toast.error("Tempo esgotado para conectar. Tente gerar novamente.");
+        addLog("Tempo esgotado para escanear QR Code.");
+        await updateStatusInDb("disconnected");
+        toast.error("Tempo esgotado. Tente novamente.");
       }
-      
     } catch (err: any) {
-      addLog(`[ERRO FATAL]`, err.message || err.toString());
+      addLog(`[ERRO] ${err.message}`);
       console.error("Connection Error:", err);
-      toast.error(`Erro na conexão. Veja os logs de depuração para detalhes.`);
+      toast.error("Erro na conexão. Veja os logs.");
       await updateStatusInDb("disconnected");
     }
     setLoading(false);
@@ -390,7 +364,7 @@ export default function WhatsAppConnect() {
     try {
       await fetch(`${apiUrl}/instance/logout/${instanceName}`, {
         method: "DELETE",
-        headers: { "apikey": apiToken },
+        headers: { "apikey": apiToken, "token": instanceToken || apiToken },
       });
       await updateStatusInDb("disconnected");
       setQrCode(null);
@@ -426,42 +400,45 @@ export default function WhatsAppConnect() {
         </div>
 
         {status === "connected" && (
-          <div className="bg-chart-2/10 border border-chart-2/30 rounded-xl p-4 text-sm text-chart-2 mb-4">
-            ✅ WhatsApp conectado! Seu CRM já pode enviar e receber mensagens automaticamente.
-          </div>
+          <>
+            <div className="bg-chart-2/10 border border-chart-2/30 rounded-xl p-4 text-sm text-chart-2 mb-4">
+              WhatsApp conectado! Seu CRM ja pode enviar e receber mensagens automaticamente.
+            </div>
+            <Button
+              onClick={() => navigate("/chat")}
+              className="w-full gap-2 bg-chart-2 hover:bg-chart-2/80 text-white mb-4"
+              size="lg"
+            >
+              <MessageSquare className="h-5 w-5" />
+              Abrir WhatsApp no CRM
+            </Button>
+          </>
         )}
 
-        <div className="bg-secondary/50 border border-border rounded-xl p-4 text-sm text-muted-foreground mb-4 flex items-start gap-2">
+        <div className="bg-secondary/50 border border-border rounded-xl p-4 text-sm text-muted-foreground flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-chart-3" />
           <div>
             <p className="font-semibold text-foreground mb-1">Conexão Persistente</p>
-            <p>Seus dados de conexão são protegidos no banco de dados. Qualquer atendente da loja pode usar a mesma conexão para enviar mensagens. Não é necessário manter a tela aberta.</p>
+            <p>Seus dados são protegidos no banco de dados. Qualquer atendente pode usar a mesma conexão. Não precisa manter a tela aberta.</p>
           </div>
         </div>
       </div>
 
-      {/* API Config - Hidden for regular UX, but kept for full transparency for Admins if needed */}
+      {/* Admin Config */}
       {isAdmin && (
         <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-foreground font-bold text-base">Configuração do Sistema</h3>
             <Badge variant="outline" className="text-[10px] opacity-70">Admin Only</Badge>
           </div>
-          
-          <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 text-xs text-primary mb-2">
-            ℹ️ A conexão utiliza a API Central da UAZAPI. Você só precisa definir o Nome da Instância abaixo.
-          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Nome da Instância (Obrigatório)</Label>
-              <Input 
-                value={instanceName} 
-                onChange={e => {
-                  setInstanceName(e.target.value);
-                  setSaved(false);
-                }} 
-                placeholder="Ex: minha-loja-ag" 
+              <Input
+                value={instanceName}
+                onChange={e => { setInstanceName(e.target.value); setSaved(false); }}
+                placeholder="Ex: minha-loja-ag"
                 className="bg-background border-primary/30"
               />
             </div>
@@ -469,11 +446,9 @@ export default function WhatsAppConnect() {
               <Button onClick={saveConfig} variant="outline" className="gap-1.5 flex-1"><Save className="h-4 w-4" /> Salvar</Button>
               <Button
                 onClick={async () => {
-                  const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
-                  addLog(`[Webhook] Iniciando configuração...`);
+                  addLog("[Webhook] Configurando...");
                   toast.info("Configurando integração...");
 
-                  // Passo 1: buscar token fresco via /instance/init (mesmo flow do QR)
                   let freshToken = instanceToken || apiToken;
                   try {
                     const initRes = await fetch(`${apiUrl}/instance/init`, {
@@ -486,43 +461,17 @@ export default function WhatsAppConnect() {
                       const tok = initData.instance?.token || initData.hash?.token || initData.token;
                       if (tok) {
                         freshToken = tok;
-                        // Persiste o token atualizado no banco
                         if (dbRecordId) {
-                          await import("@/integrations/supabase/client").then(({ supabase }) =>
-                            supabase.from("whatsapp_instances").update({ instance_token: tok }).eq("id", dbRecordId)
-                          );
+                          await supabase.from("whatsapp_instances").update({ instance_token: tok }).eq("id", dbRecordId);
                         }
-                        addLog(`[Webhook] Token renovado com sucesso`);
+                        addLog("[Webhook] Token renovado");
                       }
                     }
                   } catch (e: any) {
-                    addLog(`[Webhook] Aviso: não foi possível renovar token (${e.message}), usando token salvo`);
+                    addLog(`[Webhook] Token não renovado: ${e.message}`);
                   }
 
-                  // Passo 2: configurar webhook com token fresco
-                  try {
-                    const res = await fetch(`${apiUrl}/webhook`, {
-                      method: "POST",
-                      headers: { "token": freshToken, "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        enabled: true,
-                        url: webhookUrl,
-                        events: ["messages", "connection"],
-                        excludeMessages: ["wasSentByApi"]
-                      })
-                    });
-                    if (res.ok) {
-                      addLog(`[Webhook] ✅ Webhook configurado para: ${webhookUrl}`);
-                      toast.success("Integração ativada com sucesso!");
-                    } else {
-                      const err = await res.text();
-                      addLog(`[Webhook] ❌ Falha (${res.status}): ${err}`);
-                      toast.error("Falha ao ativar integração. Veja os logs.");
-                    }
-                  } catch (e: any) {
-                    addLog(`[Webhook] Erro: ${e.message}`);
-                    toast.error("Erro de conexão com a UAZAPI.");
-                  }
+                  await configureWebhook(freshToken);
                 }}
                 className="gap-1.5 flex-1 bg-chart-1 hover:bg-chart-1/80"
               >
@@ -531,9 +480,8 @@ export default function WhatsAppConnect() {
             </div>
           </div>
 
-          {/* Hidden fields for convenience but accessible if needed to change */}
           <details className="mt-4">
-            <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-primary">Configurações Avançadas de API</summary>
+            <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-primary">Configurações Avançadas</summary>
             <div className="pt-4 space-y-4">
               <div className="space-y-2">
                 <Label>URL da API</Label>
@@ -542,6 +490,11 @@ export default function WhatsAppConnect() {
               <div className="space-y-2">
                 <Label>Token da API</Label>
                 <Input type="password" value={apiToken} onChange={e => setApiToken(e.target.value)} placeholder="Seu token de acesso" />
+              </div>
+              <div className="space-y-2">
+                <Label>URL do Webhook (Backend Python)</Label>
+                <Input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} placeholder="https://seu-backend.koyeb.app/webhook/uzapi" />
+                <p className="text-[10px] text-muted-foreground">URL do seu backend Python que recebe os webhooks do WhatsApp</p>
               </div>
             </div>
           </details>
@@ -552,7 +505,7 @@ export default function WhatsAppConnect() {
       {saved && (
         <div className="bg-card border border-border rounded-2xl p-6 flex flex-col items-center gap-4">
           <h3 className="text-foreground font-bold text-base flex items-center gap-2"><QrCode className="h-5 w-5" /> QR Code WhatsApp</h3>
-          
+
           {qrCode ? (
             <div className="bg-white rounded-2xl p-4">
               <img src={qrCode.startsWith("data:") ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code" className="w-64 h-64" />
@@ -576,6 +529,11 @@ export default function WhatsAppConnect() {
                 <QrCode className="h-4 w-4" /> {loading ? "Gerando..." : "Gerar QR Code"}
               </Button>
             )}
+            {status === "connected" && (
+              <Button onClick={() => navigate("/chat")} className="gap-1.5 bg-chart-2 hover:bg-chart-2/80">
+                <MessageSquare className="h-4 w-4" /> Abrir WhatsApp
+              </Button>
+            )}
             <Button onClick={checkStatus} disabled={loading} variant="outline" className="gap-1.5">
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Verificar Status
             </Button>
@@ -587,15 +545,15 @@ export default function WhatsAppConnect() {
           </div>
 
           <p className="text-xs text-muted-foreground text-center max-w-md mt-2">
-            Abra o WhatsApp no celular → Menu (⋮) → Dispositivos Conectados → Conectar Dispositivo → Escaneie o QR Code acima
+            Abra o WhatsApp no celular → Menu → Dispositivos Conectados → Conectar Dispositivo → Escaneie o QR Code
           </p>
         </div>
       )}
 
-      {/* Logs de Depuração */}
+      {/* Debug Logs */}
       {debugLogs.length > 0 && (
         <details className="mt-4 bg-muted border border-border rounded-xl p-4 text-xs">
-          <summary className="text-foreground font-semibold cursor-pointer mb-2">Logs de Depuração da Conexão (Clique para expandir)</summary>
+          <summary className="text-foreground font-semibold cursor-pointer mb-2">Logs de Depuração (Clique para expandir)</summary>
           <div className="space-y-1 mt-2 max-h-60 overflow-y-auto font-mono whitespace-pre-wrap break-all text-muted-foreground">
             {debugLogs.map((log, i) => (
               <div key={i} className="border-b border-border/50 pb-1">{log}</div>
