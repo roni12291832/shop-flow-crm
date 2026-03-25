@@ -7,6 +7,7 @@ Para rodar:
   pip install -r requirements.txt
   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +22,42 @@ from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
+
+
+async def _setup_webhooks_on_startup():
+    """
+    Registra automaticamente a URL do webhook no UAZAPI para todas as instâncias.
+    Executado a cada boot do serviço — garante que deploys no Koyeb não quebrem a integração.
+    """
+    from supabase_client import get_supabase
+    from uazapi_client import uazapi
+
+    s = get_settings()
+    if not s.webhook_url:
+        logger.warning("WEBHOOK_URL não configurado — webhook não será auto-configurado no UAZAPI")
+        return
+
+    try:
+        db = get_supabase()
+        instances = db.table("whatsapp_instances").select("*").execute()
+        if not instances.data:
+            logger.info("Nenhuma instância WhatsApp encontrada para configurar webhook")
+            return
+
+        for inst in instances.data:
+            try:
+                result = await uazapi.set_webhook(
+                    inst["api_url"],
+                    inst["api_token"],
+                    inst["instance_name"],
+                    s.webhook_url,
+                    inst.get("instance_token"),
+                )
+                logger.info(f"✅ Webhook auto-configurado para '{inst['instance_name']}': {result}")
+            except Exception as e:
+                logger.warning(f"⚠️  Falha ao configurar webhook para '{inst['instance_name']}': {e}")
+    except Exception as e:
+        logger.warning(f"⚠️  Erro ao buscar instâncias para auto-configurar webhook: {e}")
 
 # ─── Scheduler ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
@@ -63,6 +100,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"   📊 Relatório diário: {s.report_hour}:{s.report_minute:02d}")
     logger.info("   🔄 Sync offline: a cada 6h")
     logger.info("   ⚠️  Leads parados: a cada 12h")
+
+    # Auto-configura webhook no UAZAPI para garantir que deploys não quebrem a integração
+    asyncio.create_task(_setup_webhooks_on_startup())
 
     yield
 

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     report_hour: int = 18    # Hora do relatório diário
     report_minute: int = 0
 
+    # URL pública deste serviço — usada para auto-configurar webhook no UAZAPI a cada startup
+    webhook_url: str = ""    # Ex: https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
