@@ -177,6 +177,7 @@ export default function Chat() {
   const [newConvClientId, setNewConvClientId] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // ---------- Load WhatsApp config ----------
@@ -197,16 +198,27 @@ export default function Chat() {
 
   // ---------- Fetch WhatsApp chats from UAZAPI ----------
   const fetchWhatsAppChats = useCallback(async () => {
-    if (!wpConfig || wpConfig.status !== "connected") return;
+    if (!wpConfig) { setChatError("wpConfig não carregado do banco"); return; }
+    if (wpConfig.status !== "connected") { setChatError(`Status da instância: "${wpConfig.status}" (precisa ser "connected")`); return; }
 
     const token = wpConfig.instance_token || wpConfig.api_token;
+    if (!token) { setChatError("Token não encontrado no banco de dados"); return; }
+
     setLoadingChats(true);
+    setChatError(null);
 
     try {
-      const url = `${wpConfig.api_url.replace(/\/$/, "")}/chats`;
-      const data = await fetchUazapi(`${url}?count=50`, token);
+      const url = `${wpConfig.api_url.replace(/\/$/, "")}/chat/find`;
+      console.log("[WA] POST", url, "token:", token.slice(0, 8) + "...");
+      const data = await fetchUazapi(url, token, "POST", { count: 50 });
+      console.log("[WA] chat/find response:", data);
 
-      const rawChats = Array.isArray(data) ? data : (data.chats || data.data || []);
+      const rawChats = Array.isArray(data) ? data : (data.chats || data.data || data.result || []);
+
+      if (rawChats.length === 0) {
+        setChatError(`API retornou 0 conversas. Resposta: ${JSON.stringify(data).slice(0, 200)}`);
+      }
+
       const normalized: WaChat[] = rawChats
         .map(normalizeChat)
         .filter((c: WaChat) => !c.is_group && c.phone.length >= 10);
@@ -240,7 +252,9 @@ export default function Chat() {
 
       setWaChats(normalized);
     } catch (e: any) {
+      const msg = e?.message || String(e);
       console.error("Erro ao buscar chats UAZAPI:", e);
+      setChatError(`Erro ao chamar UAZAPI: ${msg}. URL: ${wpConfig.api_url}/chat/find`);
     }
     setLoadingChats(false);
   }, [wpConfig]);
@@ -296,8 +310,8 @@ export default function Chat() {
     const fullJid = chatId.includes("@") ? chatId : `${chatId}@s.whatsapp.net`;
 
     try {
-      const url = `${wpConfig.api_url.replace(/\/$/, "")}/messages/${encodeURIComponent(fullJid)}?count=50`;
-      const data = await fetchUazapi(url, token);
+      const url = `${wpConfig.api_url.replace(/\/$/, "")}/message/find`;
+      const data = await fetchUazapi(url, token, "POST", { chatId: fullJid, count: 50 });
 
       const rawMsgs = Array.isArray(data) ? data : (data.messages || data.data || []);
       const normalized = rawMsgs.map(normalizeMessage).filter((m: WaMessage) => m.text);
@@ -434,9 +448,9 @@ export default function Chat() {
     const formattedPhone = phone.startsWith("55") ? phone : `55${phone}`;
 
     try {
-      const sendUrl = `${wpConfig.api_url.replace(/\/$/, "")}/message/sendText/${wpConfig.instance_name}`;
+      const sendUrl = `${wpConfig.api_url.replace(/\/$/, "")}/send/text`;
       await fetchUazapi(sendUrl, token, "POST", {
-        number: `${formattedPhone}@s.whatsapp.net`,
+        number: formattedPhone,
         text: content,
       });
 
@@ -516,10 +530,10 @@ export default function Chat() {
         const token = wpConfig.instance_token || wpConfig.api_token;
         const phone = activeClient.phone.replace(/\D/g, "");
         const formattedPhone = phone.startsWith("55") ? phone : `55${phone}`;
-        const sendUrl = `${wpConfig.api_url.replace(/\/$/, "")}/message/sendText/${wpConfig.instance_name}`;
+        const sendUrl = `${wpConfig.api_url.replace(/\/$/, "")}/send/text`;
 
         await fetchUazapi(sendUrl, token, "POST", {
-          number: `${formattedPhone}@s.whatsapp.net`,
+          number: formattedPhone,
           text: content,
         });
       } catch (e) {
@@ -745,7 +759,13 @@ export default function Chat() {
           <div className="p-8 text-center text-muted-foreground text-sm">Carregando conversas...</div>
         )}
 
-        {!loadingChats && filteredWaChats.length === 0 && filteredConvs.length === 0 && (
+        {chatError && (
+          <div className="p-4 mx-3 mt-2 bg-destructive/10 border border-destructive/30 rounded-xl text-xs text-destructive font-mono break-all">
+            <strong>Erro ao carregar conversas:</strong><br />{chatError}
+          </div>
+        )}
+
+        {!loadingChats && filteredWaChats.length === 0 && filteredConvs.length === 0 && !chatError && (
           <div className="p-8 text-center text-muted-foreground text-sm">
             {wpConnected ? "Nenhuma conversa encontrada" : "WhatsApp desconectado"}
           </div>
