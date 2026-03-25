@@ -467,48 +467,63 @@ export default function WhatsAppConnect() {
             </div>
             <div className="flex items-end gap-2">
               <Button onClick={saveConfig} variant="outline" className="gap-1.5 flex-1"><Save className="h-4 w-4" /> Salvar</Button>
-              <Button 
-                onClick={() => {
-                    const setup = async () => {
-                      const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
-                      const currentToken = instanceToken || apiToken;
-                      const endpoints = [
-                        { url: `${apiUrl}/webhook`, headers: { "token": currentToken, "admintoken": apiToken } },
-                        { url: `${apiUrl}/instance/webhook/${instanceName}`, headers: { "apikey": apiToken } },
-                        { url: `${apiUrl}/webhook/instance/${instanceName}`, headers: { "apikey": apiToken } }
-                      ];
-                      
-                      addLog(`[Webhook] Iniciando configuração manual... Target: ${webhookUrl}`);
-                      toast.info("Configurando integração...");
+              <Button
+                onClick={async () => {
+                  const webhookUrl = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi";
+                  addLog(`[Webhook] Iniciando configuração...`);
+                  toast.info("Configurando integração...");
 
-                      for (const ep of endpoints) {
-                        try {
-                          addLog(`[Webhook] Tentando: ${ep.url}`);
-                          const res = await fetch(ep.url, {
-                            method: "POST",
-                            headers: { ...ep.headers, "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              enabled: true,
-                              url: webhookUrl,
-                              events: ["messages", "connection", "MESSAGES_UPSERT", "CONNECTION_UPDATE"],
-                              excludeMessages: ["wasSentByApi"]
-                            })
-                          });
-                          if (res.ok) {
-                            addLog(`[Webhook] ✅ Sucesso via ${ep.url}`);
-                            toast.success("Integração ativada com sucesso!");
-                            return;
-                          }
-                          const errText = await res.text();
-                          addLog(`[Webhook] ❌ Falha em ${ep.url} (${res.status}): ${errText}`);
-                        } catch (e: any) {
-                          addLog(`[Webhook] Erro em ${ep.url}: ${e.message}`);
+                  // Passo 1: buscar token fresco via /instance/init (mesmo flow do QR)
+                  let freshToken = instanceToken || apiToken;
+                  try {
+                    const initRes = await fetch(`${apiUrl}/instance/init`, {
+                      method: "POST",
+                      headers: { "apikey": apiToken, "admintoken": apiToken, "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: instanceName })
+                    });
+                    if (initRes.ok) {
+                      const initData = await initRes.json();
+                      const tok = initData.instance?.token || initData.hash?.token || initData.token;
+                      if (tok) {
+                        freshToken = tok;
+                        // Persiste o token atualizado no banco
+                        if (dbRecordId) {
+                          await import("@/integrations/supabase/client").then(({ supabase }) =>
+                            supabase.from("whatsapp_instances").update({ instance_token: tok }).eq("id", dbRecordId)
+                          );
                         }
+                        addLog(`[Webhook] Token renovado com sucesso`);
                       }
-                      toast.error("Não foi possível ativar a integração. Veja os logs abaixo.");
-                    };
-                    setup();
-                }} 
+                    }
+                  } catch (e: any) {
+                    addLog(`[Webhook] Aviso: não foi possível renovar token (${e.message}), usando token salvo`);
+                  }
+
+                  // Passo 2: configurar webhook com token fresco
+                  try {
+                    const res = await fetch(`${apiUrl}/webhook`, {
+                      method: "POST",
+                      headers: { "token": freshToken, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        enabled: true,
+                        url: webhookUrl,
+                        events: ["messages", "connection"],
+                        excludeMessages: ["wasSentByApi"]
+                      })
+                    });
+                    if (res.ok) {
+                      addLog(`[Webhook] ✅ Webhook configurado para: ${webhookUrl}`);
+                      toast.success("Integração ativada com sucesso!");
+                    } else {
+                      const err = await res.text();
+                      addLog(`[Webhook] ❌ Falha (${res.status}): ${err}`);
+                      toast.error("Falha ao ativar integração. Veja os logs.");
+                    }
+                  } catch (e: any) {
+                    addLog(`[Webhook] Erro: ${e.message}`);
+                    toast.error("Erro de conexão com a UAZAPI.");
+                  }
+                }}
                 className="gap-1.5 flex-1 bg-chart-1 hover:bg-chart-1/80"
               >
                 Ativar Integração
