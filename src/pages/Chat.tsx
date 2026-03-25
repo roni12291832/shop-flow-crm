@@ -210,7 +210,7 @@ export default function Chat() {
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/chat/find`;
       console.log("[WA] POST", url, "token:", token.slice(0, 8) + "...");
-      const data = await fetchUazapi(url, token, "POST", { count: 50 });
+      const data = await fetchUazapi(url, token, "POST", { limit: 50 });
       console.log("[WA] chat/find response:", data);
 
       const rawChats = Array.isArray(data) ? data : (data.chats || data.data || data.result || []);
@@ -311,7 +311,7 @@ export default function Chat() {
 
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/message/find`;
-      const data = await fetchUazapi(url, token, "POST", { chatId: fullJid, count: 50 });
+      const data = await fetchUazapi(url, token, "POST", { chatId: fullJid, limit: 50 });
 
       const rawMsgs = Array.isArray(data) ? data : (data.messages || data.data || []);
       const normalized = rawMsgs.map(normalizeMessage).filter((m: WaMessage) => m.text);

@@ -170,7 +170,7 @@ class UazapiClient:
             "token": instance_token,
             "Content-Type": "application/json",
         }
-        payload = {"count": count}
+        payload = {"limit": count}
 
         async with httpx.AsyncClient(timeout=20) as client:
             try:
@@ -226,7 +226,7 @@ class UazapiClient:
         }
         payload = {
             "chatId": chat_id,
-            "count": count,
+            "limit": count,
         }
 
         async with httpx.AsyncClient(timeout=20) as client:
