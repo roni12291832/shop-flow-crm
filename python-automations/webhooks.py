@@ -1,7 +1,17 @@
 from __future__ import annotations
 """
-Rotas de Webhook — recebem dados do WhatsApp (UAZAPI) e processam.
-Substitui completamente o fluxo N8N 08-whatsapp-lead-auto-pipeline.
+Rotas de Webhook — recebem eventos do WhatsApp via UAZAPI GO e processam.
+
+Formato esperado da UAZAPI GO:
+{
+  "event": "messages",
+  "instance": "nome-da-instancia",
+  "data": {
+    "key": { "remoteJid": "5511999999999@s.whatsapp.net", "fromMe": false },
+    "pushName": "Nome do Contato",
+    "message": { "conversation": "texto da mensagem" }
+  }
+}
 """
 from datetime import datetime
 
@@ -69,63 +79,46 @@ async def receive_whatsapp_message(request: Request):
     except Exception:
         return {"status": "error", "message": "JSON inválido"}
 
-    # Log TUDO que chega para facilitar diagnóstico
-    logger.info(f"[WEBHOOK RECEBIDO] keys={list(body.keys())} event={body.get('event')} type={body.get('type')}")
+    # Log tudo que chega para facilitar diagnóstico
+    logger.info(f"[WEBHOOK] event={body.get('event')} instance={body.get('instance')} keys={list(body.keys())}")
 
-    event = (body.get("event", "") or body.get("type", "") or "").upper()
+    event = (body.get("event", "") or "").upper()
     message_data = body.get("data", body)
 
-    # UAZAPI GO envia event: "messages" ou event: "connection"
-    # Aceita qualquer evento que contenha "message" no nome
-    accepted_events = ("MESSAGES", "MESSAGE")
-    is_connection_event = "CONNECTION" in event or "CONNECT" in event
-
-    if event not in accepted_events and not is_connection_event and "instance" not in body:
-        logger.info(f"Webhook ignorado: evento '{event}'")
+    # UAZAPI GO envia event: "messages" para mensagens recebidas
+    # Ignorar eventos de connection/status — não são mensagens
+    if "MESSAGE" not in event:
+        if event:
+            logger.info(f"Webhook ignorado: evento '{event}' não é mensagem")
         return {"status": "ignored", "reason": f"evento {event} não é mensagem"}
 
-    logger.info(f"Webhook recebido: evento={event} | data_type={type(message_data)}")
+    if not isinstance(message_data, dict):
+        return {"status": "ignored", "reason": "formato de dados não reconhecido"}
 
-    if isinstance(message_data, dict):
-        # Se for Evolution/v2, os dados podem estar dentro de 'messages' (lista)
-        if "messages" in message_data and isinstance(message_data["messages"], list) and message_data["messages"]:
-            message_data = message_data["messages"][0]
+    # Extrai dados da mensagem no formato UAZAPI GO
+    key = message_data.get("key", {})
+    remote_jid = key.get("remoteJid", "") or message_data.get("from", "") or ""
+    from_me = key.get("fromMe", False) or message_data.get("fromMe", False)
 
-        # Tenta vários caminhos comuns para o JID e Conteúdo
-        remote_jid = (
-            message_data.get("key", {}).get("remoteJid", "") 
-            or message_data.get("from", "")
-            or message_data.get("chatId", "")
-            or message_data.get("participant", "")
+    msg_obj = message_data.get("message", {}) or {}
+    if isinstance(msg_obj, str):
+        message_text = msg_obj
+    else:
+        message_text = (
+            msg_obj.get("conversation", "")
+            or msg_obj.get("extendedTextMessage", {}).get("text", "")
+            or msg_obj.get("imageMessage", {}).get("caption", "")
+            or msg_obj.get("videoMessage", {}).get("caption", "")
+            or message_data.get("body", "")
+            or message_data.get("text", "")
             or ""
         )
-        msg_obj = message_data.get("message", {}) or {}
-        
-        if isinstance(msg_obj, str):
-            message_text = msg_obj
-        else:
-            message_text = (
-                msg_obj.get("conversation", "")
-                or msg_obj.get("extendedTextMessage", {}).get("text", "")
-                or msg_obj.get("imageMessage", {}).get("caption", "")
-                or msg_obj.get("videoMessage", {}).get("caption", "")
-                or message_data.get("body", "")
-                or message_data.get("text", "")
-                or ""
-            )
 
-        from_me = (
-            message_data.get("key", {}).get("fromMe", False)
-            or message_data.get("fromMe", False)
-        )
-        push_name = (
-            message_data.get("pushName", "") 
-            or message_data.get("senderName", "")
-            or message_data.get("name", "")
-            or f"WhatsApp {remote_jid.split('@', 1)[0][-4:] if '@' in remote_jid else 'Lead'}"
-        )
-    else:
-        return {"status": "ignored", "reason": "formato de dados não reconhecido"}
+    push_name = (
+        message_data.get("pushName", "")
+        or message_data.get("senderName", "")
+        or f"WhatsApp {remote_jid.split('@')[0][-4:] if '@' in remote_jid else 'Lead'}"
+    )
 
     if from_me:
         return {"status": "ignored", "reason": "mensagem própria"}
