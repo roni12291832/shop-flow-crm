@@ -472,6 +472,7 @@ export default function Chat() {
     const activeChat = waChats.find(c => c.id === activeChatId);
     let clientId = activeChat?.crm_client_id;
 
+    // Tenta encontrar cliente pelos dois formatos de telefone
     if (!clientId && activeChatId) {
       const rawPhone = activeChatId.replace("@s.whatsapp.net", "").replace("@c.us", "");
       for (const ph of [rawPhone, rawPhone.startsWith("55") ? rawPhone.slice(2) : `55${rawPhone}`]) {
@@ -479,23 +480,58 @@ export default function Chat() {
         if (data) { clientId = data.id; break; }
       }
     }
-    if (!clientId) { toast.error("Cliente não encontrado no CRM"); return; }
+
+    // Se ainda não encontrou → cria o cliente automaticamente a partir dos dados do WhatsApp
+    if (!clientId && activeChatId && activeChat) {
+      const rawPhone = activeChatId.replace("@s.whatsapp.net", "").replace("@c.us", "");
+      const { data: newClient, error: clientErr } = await supabase
+        .from("clients")
+        .insert({
+          name: activeChat.name || `WhatsApp ${rawPhone.slice(-4)}`,
+          phone: rawPhone,
+          origin: "whatsapp",
+        })
+        .select("id")
+        .single();
+      if (clientErr) { toast.error(`Erro ao criar cliente: ${clientErr.message}`); return; }
+      clientId = newClient.id;
+      // Atualiza o chat local com o novo crm_client_id
+      setWaChats(prev => prev.map(c => c.id === activeChatId ? { ...c, crm_client_id: clientId } : c));
+      toast.success(`Lead "${activeChat.name}" adicionado ao CRM!`);
+    }
+
+    if (!clientId) { toast.error("Não foi possível identificar o cliente"); return; }
+
+    const oldStage = clientOpp?.stage;
 
     if (clientOpp) {
       const { error } = await supabase.from("opportunities")
         .update({ stage: newStage as any, responsible_id: user.id })
         .eq("id", clientOpp.id);
-      if (error) { console.error(error); toast.error(`Erro: ${error.message}`); }
-      else { toast.success("Etapa atualizada!"); setClientOpp({ ...clientOpp, stage: newStage }); }
+      if (error) { console.error(error); toast.error(`Erro: ${error.message}`); return; }
+      toast.success("Etapa atualizada!");
+      setClientOpp({ ...clientOpp, stage: newStage });
+      // Notifica o motor de follow-up
+      fetch(`${PYTHON_BACKEND_URL}/followup/on-stage-change`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, opportunity_id: clientOpp.id, new_stage: newStage, old_stage: oldStage }),
+      }).catch(() => {});
     } else {
       const client = clients.find(c => c.id === clientId);
       const { data, error } = await supabase.from("opportunities").insert({
         client_id: clientId,
-        title: `Oportunidade - ${client?.name || activeChat?.name || "Cliente"}`,
+        title: `Lead WhatsApp - ${client?.name || activeChat?.name || "Cliente"}`,
         stage: newStage as any, responsible_id: user.id,
+        estimated_value: 0,
       }).select("id, stage").single();
-      if (error) { console.error(error); toast.error(`Erro: ${error.message}`); }
-      else { toast.success("Oportunidade criada!"); setClientOpp(data); }
+      if (error) { console.error(error); toast.error(`Erro: ${error.message}`); return; }
+      toast.success("Lead adicionado ao CRM!");
+      setClientOpp(data);
+      // Notifica o motor de follow-up
+      fetch(`${PYTHON_BACKEND_URL}/followup/on-stage-change`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, opportunity_id: data.id, new_stage: newStage, old_stage: null }),
+      }).catch(() => {});
     }
   };
 
@@ -849,6 +885,16 @@ export default function Chat() {
           )}
           <div className="pt-2 border-t border-border">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Etapa no CRM</div>
+            {!activeChat?.crm_client_id && !clientOpp && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full text-xs gap-1.5 mb-2 border-dashed"
+                onClick={() => handleStageChange("lead_novo")}
+              >
+                <Plus className="h-3.5 w-3.5" />Adicionar ao CRM
+              </Button>
+            )}
             <Select value={clientOpp?.stage || ""} onValueChange={handleStageChange}>
               <SelectTrigger className="h-8 text-xs rounded-lg">
                 <SelectValue placeholder="Sem etapa" />
