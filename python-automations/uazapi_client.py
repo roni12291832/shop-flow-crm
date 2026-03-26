@@ -225,7 +225,7 @@ class UazapiClient:
             "Content-Type": "application/json",
         }
         payload = {
-            "chatId": chat_id,
+            "chatid": chat_id,
             "limit": count,
         }
 

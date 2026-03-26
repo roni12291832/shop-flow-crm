@@ -90,43 +90,40 @@ interface Client {
 
 // ---------- Helpers ----------
 function normalizeChat(raw: any): WaChat {
-  const jid = raw.id || raw.jid || raw.remoteJid || "";
-  const phone = jid.replace("@s.whatsapp.net", "").replace("@c.us", "");
+  // UAZAPI GO V2: JID real está em wa_chatid, não em id (que é ID interno)
+  const jid = raw.wa_chatid || raw.remoteJid || raw.jid || "";
+  const rawPhone = raw.phone || "";
+  const phone = jid
+    ? jid.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@g.us", "")
+    : rawPhone.replace(/\D/g, "");
   return {
     id: jid,
     phone,
-    name: raw.name || raw.pushName || raw.notifyName || `WhatsApp ${phone.slice(-4)}`,
-    last_message: raw.lastMessage || raw.lastMsg || raw.preview || "",
-    last_message_at: raw.lastMessageAt || raw.t || raw.timestamp || null,
-    unread_count: raw.unreadCount || raw.unread || 0,
-    is_group: jid.includes("@g.us"),
+    name: raw.name || raw.wa_contactName || raw.wa_name || `WhatsApp ${phone.slice(-4)}`,
+    last_message: raw.wa_lastMessageType || "",
+    last_message_at: raw.wa_lastMsgTimestamp || null,
+    unread_count: raw.wa_unreadCount || 0,
+    is_group: raw.wa_isGroup === true,
   };
 }
 
 function normalizeMessage(raw: any): WaMessage {
-  const key = raw.key || {};
-  const msgObj = raw.message || {};
-
-  let text = "";
-  if (typeof msgObj === "string") {
-    text = msgObj;
-  } else {
-    text =
-      msgObj.conversation ||
-      msgObj.extendedTextMessage?.text ||
-      msgObj.imageMessage?.caption ||
-      msgObj.videoMessage?.caption ||
-      raw.body ||
-      raw.text ||
-      "";
-  }
+  // UAZAPI GO V2: campos diretos no objeto
+  const text =
+    raw.text ||
+    raw.body ||
+    raw.message?.conversation ||
+    raw.message?.extendedTextMessage?.text ||
+    raw.message?.imageMessage?.caption ||
+    raw.message?.videoMessage?.caption ||
+    "";
 
   return {
-    id: key.id || raw.id || Math.random().toString(36),
-    from_me: key.fromMe ?? raw.fromMe ?? false,
+    id: raw.messageid || raw.id || raw.key?.id || Math.random().toString(36),
+    from_me: raw.fromMe ?? raw.key?.fromMe ?? false,
     text,
     timestamp: raw.messageTimestamp || raw.t || raw.timestamp,
-    type: msgObj && typeof msgObj === "object" ? Object.keys(msgObj)[0] || "text" : "text",
+    type: raw.messageType || "text",
     source: "whatsapp",
   };
 }
@@ -311,7 +308,7 @@ export default function Chat() {
 
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/message/find`;
-      const data = await fetchUazapi(url, token, "POST", { chatId: fullJid, limit: 50 });
+      const data = await fetchUazapi(url, token, "POST", { chatid: fullJid, limit: 50 });
 
       const rawMsgs = Array.isArray(data) ? data : (data.messages || data.data || []);
       const normalized = rawMsgs.map(normalizeMessage).filter((m: WaMessage) => m.text);
