@@ -13,5 +13,5 @@ COPY . .
 
 EXPOSE 8000
 
-# Usa a porta fornecida pela Koyeb ou fallback para 8000
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Usa a porta 8000 conforme configurado na Koyeb
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
