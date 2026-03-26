@@ -260,39 +260,53 @@ async def receive_whatsapp_message(request: Request):
                     logger.error("Fallback de mensagem também falhou: %s", e2)
 
         # ─── 4. Cria ou Atualiza Oportunidade (Pipeline) ─────────────────
-        if is_new and not DRY_RUN:
+        opportunity_action = "none"
+        if not DRY_RUN:
             try:
-                db.table("opportunities").insert({
-                    "title": f"Lead WhatsApp - {push_name or phone}",
-                    "client_id": client_id,
-                    "stage": "lead_novo",
-                    "estimated_value": 0,
-                }).execute()
-                logger.info("Nova oportunidade criada no pipeline para %s", push_name)
-            except Exception as e:
-                logger.warning("Erro ao criar oportunidade (stage inválido?): %s", e)
-        elif not is_new:
-            try:
-                active_opp_res = (
+                # Busca qualquer oportunidade existente para este cliente
+                any_opp_res = (
                     db.table("opportunities")
                     .select("id, stage")
                     .eq("client_id", client_id)
-                    .in_("stage", ["lead_novo", "contato_iniciado"])
                     .order("created_at", desc=True)
                     .limit(1)
                     .execute()
                 )
-                if active_opp_res.data:
-                    opp = active_opp_res.data[0]
+                existing_opp = any_opp_res.data[0] if any_opp_res.data else None
+
+                if not existing_opp:
+                    # Sem oportunidade alguma → cria em lead_novo (novo OU cliente existente sem opp)
+                    ins = db.table("opportunities").insert({
+                        "title": f"Lead WhatsApp - {push_name or phone}",
+                        "client_id": client_id,
+                        "stage": "lead_novo",
+                        "estimated_value": 0,
+                    }).execute()
+                    if ins.data:
+                        opportunity_action = "created_lead_novo"
+                        logger.info("Oportunidade 'lead_novo' criada para %s (%s)", push_name, phone)
+                    else:
+                        opportunity_action = "create_failed"
+                        logger.error("Falha ao criar oportunidade para %s: %s", push_name, ins)
+
+                elif existing_opp["stage"] in ("lead_novo", "contato_iniciado"):
+                    # Oportunidade ativa em etapa inicial → tenta avançar via IA
+                    opportunity_action = f"existing_{existing_opp['stage']}"
                     try:
                         is_interested = await jarvis.analyze_client_intent(message_text)
-                        if is_interested and not DRY_RUN:
-                            db.table("opportunities").update({"stage": "interessado"}).eq("id", opp["id"]).execute()
-                            logger.info("Oportunidade de %s atualizada para 'interessado' via IA", push_name)
+                        if is_interested:
+                            db.table("opportunities").update({"stage": "interessado"}).eq("id", existing_opp["id"]).execute()
+                            opportunity_action = "advanced_to_interessado"
+                            logger.info("Oportunidade de %s avançada para 'interessado' via IA", push_name)
                     except Exception as e:
-                        logger.warning("Erro ao analisar intenção do cliente via IA: %s", e)
+                        logger.warning("Erro ao analisar intenção via IA (não crítico): %s", e)
+
+                else:
+                    opportunity_action = f"existing_{existing_opp['stage']}_no_change"
+
             except Exception as e:
-                logger.warning("Erro ao buscar/atualizar oportunidade: %s", e)
+                opportunity_action = f"error: {e}"
+                logger.error("Erro ao gerenciar oportunidade para %s (%s): %s", push_name, phone, e)
 
         # ─── 5. Resposta Automática via Jarvis ────────────────────────────
         try:
@@ -349,7 +363,10 @@ async def receive_whatsapp_message(request: Request):
         return {
             "status": "ok",
             "client_id": client_id,
+            "client_name": push_name,
+            "phone": phone,
             "is_new_lead": is_new,
+            "opportunity_action": opportunity_action,
             "message_saved": not DRY_RUN,
         }
 
