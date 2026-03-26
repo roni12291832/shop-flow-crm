@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Bot, Send, Plus, Trash2, WifiOff, Wifi, Phone, User, ArrowLeft } from "lucide-react";
+import { Search, Bot, Send, Plus, Trash2, WifiOff, Wifi, Phone, User, ArrowLeft, Paperclip, MapPin, Image, FileText, MoreVertical, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ const STAGES = [
   { value: "perdido", label: "Perdido" },
   { value: "desqualificado", label: "Desqualificado" },
 ];
+const PYTHON_BACKEND_URL = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app";
 
 // ---------- Tipos ----------
 interface WpInstance {
@@ -58,6 +59,8 @@ interface WaMessage {
   type?: string;
   source?: string;
   sender_type?: string;
+  media_url?: string;
+  mimetype?: string;
 }
 
 interface Conversation {
@@ -122,9 +125,11 @@ function normalizeMessage(raw: any): WaMessage {
     id: raw.messageid || raw.id || raw.key?.id || Math.random().toString(36),
     from_me: raw.fromMe ?? raw.key?.fromMe ?? false,
     text,
-    timestamp: raw.messageTimestamp || raw.t || raw.timestamp,
-    type: raw.messageType || "text",
+    timestamp: raw.messageid?.endsWith("crm") ? raw.timestamp : (raw.messageTimestamp || raw.t || raw.timestamp),
+    type: raw.messageType || (raw.message?.imageMessage ? "image" : raw.message?.videoMessage ? "video" : raw.message?.audioMessage ? "audio" : raw.message?.documentMessage ? "document" : "text"),
     source: "whatsapp",
+    media_url: raw.message?.imageMessage?.url || raw.message?.videoMessage?.url || raw.message?.audioMessage?.url || raw.message?.documentMessage?.url,
+    mimetype: raw.message?.imageMessage?.mimetype || raw.message?.videoMessage?.mimetype || raw.message?.audioMessage?.mimetype || raw.message?.documentMessage?.mimetype,
   };
 }
 
@@ -175,6 +180,8 @@ export default function Chat() {
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // ---------- Load WhatsApp config ----------
@@ -539,6 +546,107 @@ export default function Chat() {
       }
     }
   };
+  
+  const sendMediaWhatsApp = async (file: File) => {
+    if (!activeChatId || !wpConfig) return;
+    setIsUploading(true);
+    
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(",")[1];
+      const type = file.type.startsWith("image/") ? "image" : 
+                   file.type.startsWith("video/") ? "video" : 
+                   file.type.startsWith("audio/") ? "audio" : "document";
+      
+      try {
+        const phone = activeChatId.replace(/\D/g, "");
+        const formattedPhone = phone.startsWith("55") ? phone : `55${phone}`;
+        
+        const res = await fetch(`${PYTHON_BACKEND_URL}/whatsapp/conversations/send-media`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instance_token: wpConfig.instance_token || wpConfig.api_token,
+            phone: formattedPhone,
+            media_type: type,
+            media_base64: base64,
+            caption: file.name
+          })
+        });
+        
+        if (!res.ok) throw new Error("Erro no backend");
+        
+        toast.success("Mídia enviada!");
+        fetchWhatsAppMessages(activeChatId);
+      } catch (e) {
+        console.error("Erro ao enviar mídia:", e);
+        toast.error("Erro ao enviar mídia");
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  
+  const sendLocationWhatsApp = () => {
+    if (!activeChatId || !wpConfig) return;
+    
+    if (!navigator.geolocation) {
+      toast.error("Geolocalização não suportada no seu navegador");
+      return;
+    }
+    
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const phone = activeChatId.replace(/\D/g, "");
+        const formattedPhone = phone.startsWith("55") ? phone : `55${phone}`;
+        
+        const res = await fetch(`${PYTHON_BACKEND_URL}/whatsapp/conversations/send-location`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instance_token: wpConfig.instance_token || wpConfig.api_token,
+            phone: formattedPhone,
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            address: "Minha Localização"
+          })
+        });
+        
+        if (!res.ok) throw new Error("Erro no backend");
+        
+        toast.success("Localização enviada!");
+        fetchWhatsAppMessages(activeChatId);
+      } catch (e) {
+        toast.error("Erro ao enviar localização");
+      }
+    });
+  };
+  
+  const deleteWhatsAppMessage = async (messageId: string) => {
+    if (!activeChatId || !wpConfig) return;
+    if (!confirm("Apagar mensagem para TODOS?")) return;
+    
+    try {
+      const res = await fetch(`${PYTHON_BACKEND_URL}/whatsapp/messages/delete`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instance_token: wpConfig.instance_token || wpConfig.api_token,
+          message_id: messageId,
+          phone: activeChatId,
+          all: true
+        })
+      });
+      
+      if (!res.ok) throw new Error("Erro ao apagar");
+      
+      toast.success("Mensagem apagada!");
+      setWaMessages(prev => prev.filter(m => m.id !== messageId));
+    } catch (e) {
+      toast.error("Erro ao apagar mensagem");
+    }
+  };
 
   const handleSend = () => {
     if (activeChatId) sendWhatsAppMessage();
@@ -830,17 +938,57 @@ export default function Chat() {
           )}
           {displayMessages.map(m => {
             const isMe = m.from_me;
+            const isMedia = m.type === "image" || m.type === "video";
+            
             return (
-              <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                <div className={`rounded-xl px-3.5 py-2 max-w-[75%] shadow-sm ${
+              <div key={m.id} className={`flex group ${isMe ? "justify-end" : "justify-start"}`}>
+                <div className={`relative rounded-xl px-3.5 py-2 max-w-[75%] shadow-sm ${
                   isMe
                     ? "bg-primary text-primary-foreground rounded-br-sm"
                     : "bg-card border border-border rounded-bl-sm"
                 }`}>
+                  {isMe && isUsingWhatsApp && (
+                    <button 
+                      onClick={() => deleteWhatsAppMessage(m.id)}
+                      className="absolute -left-8 top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  
                   {m.sender_type === "ia" || m.sender_type === "agent" ? (
                     <div className="text-[10px] font-semibold mb-0.5 opacity-70">Bot</div>
                   ) : null}
-                  <span className="text-[13px] whitespace-pre-wrap break-words">{m.text}</span>
+                  
+                  {isMedia && m.media_url && (
+                    <div className="mb-2 rounded-lg overflow-hidden border border-border/20">
+                      {m.type === "image" ? (
+                         <img src={m.media_url} alt="imagem" className="max-w-full h-auto cursor-pointer" onClick={() => window.open(m.media_url)} />
+                      ) : (
+                         <video src={m.media_url} controls className="max-w-full h-auto" />
+                      )}
+                    </div>
+                  )}
+                  
+                  {m.type === "audio" && (
+                    <audio src={m.media_url} controls className="max-w-full h-8 mb-2" />
+                  )}
+                  
+                  {m.type === "document" && (
+                     <div className="flex items-center gap-2 mb-2 p-2 bg-background/20 rounded border border-border/10 cursor-pointer" onClick={() => window.open(m.media_url)}>
+                        <FileText className="h-4 w-4" />
+                        <span className="text-[11px] truncate">{m.text || "Documento"}</span>
+                     </div>
+                  )}
+
+                  {m.type !== "image" && m.type !== "video" && m.type !== "audio" && m.type !== "document" && (
+                    <span className="text-[13px] whitespace-pre-wrap break-words">{m.text}</span>
+                  )}
+                  
+                  {isMedia && m.text && (
+                     <p className="text-[13px] mt-1 whitespace-pre-wrap break-words border-t border-border/10 pt-1">{m.text}</p>
+                  )}
+                  
                   <div className={`text-[10px] mt-1 ${isMe ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                     {formatMsgTime(m.timestamp)}
                     {isMe && " \u2713\u2713"}
@@ -852,16 +1000,38 @@ export default function Chat() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div className="px-4 py-3 border-t border-border flex gap-2 items-center bg-card shrink-0">
-          <Input className="flex-1 bg-background border-border text-[13px]"
-            placeholder="Digite uma mensagem..."
-            value={msg} onChange={e => setMsg(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          />
-          <Button size="sm" className="gap-1.5" onClick={handleSend} disabled={!msg.trim()}>
-            <Send className="h-4 w-4" />
-          </Button>
+        {/* Input area improved with media/location */}
+        <div className="px-4 py-3 border-t border-border bg-card shrink-0 space-y-2">
+          <div className="flex items-center gap-2">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={e => e.target.files?.[0] && sendMediaWhatsApp(e.target.files[0])}
+            />
+            
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => fileInputRef.current?.click()} title="Anexo">
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} title="Imagem">
+              <Image className="h-4 w-4" />
+            </Button>
+
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={sendLocationWhatsApp} title="Enviar Localização">
+              <MapPin className="h-4 w-4" />
+            </Button>
+            
+            <Input className="flex-1 bg-background border-border text-[13px]"
+              placeholder={isUploading ? "Enviando arquivo..." : "Digite uma mensagem..."}
+              value={msg} onChange={e => setMsg(e.target.value)}
+              disabled={isUploading}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            />
+            <Button size="sm" className="gap-1.5" onClick={handleSend} disabled={!msg.trim() || isUploading}>
+              {loadingChats || isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       </div>
     );
