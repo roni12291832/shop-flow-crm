@@ -31,3 +31,4 @@ __pycache__/
 
 # Cloudflare Workers experiment (abandoned, contains secrets)
 python-worker/
+.claude
