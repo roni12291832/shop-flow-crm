@@ -38,6 +38,7 @@ interface WaChat {
   id: string; phone: string; name: string;
   last_message: string; last_message_at: number | string | null;
   unread_count: number; is_group: boolean; crm_client_id?: string | null;
+  avatar_url?: string | null;
 }
 interface WaMessage {
   id: string; from_me: boolean; text: string;
@@ -48,6 +49,7 @@ interface WaMessage {
 interface Client {
   id: string; name: string; phone: string | null;
   ticket_medio: number | null; origin: string | null;
+  avatar_url?: string | null;
 }
 
 // ---------- Helpers ----------
@@ -239,12 +241,12 @@ export default function Chat() {
       const phones = normalized.map(c => c.phone);
       const alts = phones.map(p => p.startsWith("55") ? p.slice(2) : `55${p}`);
       const allPhones = [...new Set([...phones, ...alts])];
-      const { data: crmClients } = await supabase.from("clients").select("id, phone, name").in("phone", allPhones);
-      const crmMap: Record<string, { id: string; name: string }> = {};
-      (crmClients || []).forEach(c => { crmMap[c.phone] = { id: c.id, name: c.name }; });
+      const { data: crmClients } = await supabase.from("clients").select("id, phone, name, avatar_url").in("phone", allPhones);
+      const crmMap: Record<string, { id: string; name: string; avatar_url?: string | null }> = {};
+      (crmClients || []).forEach((c: any) => { crmMap[c.phone] = { id: c.id, name: c.name, avatar_url: c.avatar_url }; });
       normalized.forEach(chat => {
         const crm = crmMap[chat.phone] || crmMap[chat.phone.startsWith("55") ? chat.phone.slice(2) : `55${chat.phone}`];
-        if (crm) { chat.name = crm.name; chat.crm_client_id = crm.id; }
+        if (crm) { chat.name = crm.name; chat.crm_client_id = crm.id; chat.avatar_url = crm.avatar_url; }
       });
 
       normalized.sort((a, b) => {
@@ -261,7 +263,7 @@ export default function Chat() {
   }, [wpConfig]);
 
   useEffect(() => {
-    supabase.from("clients").select("id, name, phone, ticket_medio, origin")
+    supabase.from("clients").select("id, name, phone, ticket_medio, origin, avatar_url")
       .then(({ data }) => setClients((data || []) as Client[]));
   }, []);
 
@@ -333,6 +335,40 @@ export default function Chat() {
   useEffect(() => {
     if (activeChatId) fetchMessages(activeChatId);
   }, [activeChatId, fetchMessages]);
+
+  // ---------- Fetch & save profile picture ----------
+  const fetchAndSaveProfilePicture = useCallback(async (chat: WaChat) => {
+    if (!wpConfig || chat.avatar_url) return; // already have it
+    const token = wpConfig.instance_token || wpConfig.api_token;
+    const phone = chat.phone.startsWith("55") ? chat.phone : `55${chat.phone}`;
+    try {
+      const url = `${wpConfig.api_url.replace(/\/$/, "")}/contact/profilepicture`;
+      const data = await fetchUazapi(url, token, "POST", { number: phone });
+      const picUrl: string | undefined =
+        data?.profilePictureUrl || data?.imageUrl || data?.picture || data?.url;
+      if (!picUrl) return;
+      // Update local state
+      setWaChats(prev => prev.map(c => c.id === chat.id ? { ...c, avatar_url: picUrl } : c));
+      // Persist to Supabase if client exists in CRM
+      if (chat.crm_client_id) {
+        await supabase.from("clients").update({ avatar_url: picUrl } as any).eq("id", chat.crm_client_id);
+      } else {
+        // Try to find client by phone and update
+        const rawPhone = chat.phone;
+        for (const ph of [rawPhone, rawPhone.startsWith("55") ? rawPhone.slice(2) : `55${rawPhone}`]) {
+          const { data: cd } = await supabase.from("clients").select("id").eq("phone", ph).limit(1).maybeSingle();
+          if (cd) { await supabase.from("clients").update({ avatar_url: picUrl } as any).eq("id", cd.id); break; }
+        }
+      }
+    } catch { /* silent — profile picture is optional */ }
+  }, [wpConfig]);
+
+  useEffect(() => {
+    if (activeChatId) {
+      const chat = waChats.find(c => c.id === activeChatId);
+      if (chat) fetchAndSaveProfilePicture(chat);
+    }
+  }, [activeChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll
   useEffect(() => {
@@ -656,8 +692,11 @@ export default function Chat() {
             <div key={chat.id} onClick={() => { setActiveChatId(chat.id); if (isMobile) setShowMobileChat(true); }}
               className={`flex items-center gap-3 px-3 py-3 cursor-pointer border-b border-border/30 transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted/40"}`}>
               {/* Avatar */}
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center text-white text-[12px] font-bold shrink-0">
-                {getInitials(chat.name)}
+              <div className="w-10 h-10 rounded-full shrink-0 overflow-hidden bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center">
+                {chat.avatar_url
+                  ? <img src={chat.avatar_url} alt={chat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  : <span className="text-white text-[12px] font-bold">{getInitials(chat.name)}</span>
+                }
               </div>
               {/* Info */}
               <div className="flex-1 min-w-0">
@@ -708,8 +747,11 @@ export default function Chat() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             )}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center text-white text-xs font-bold">
-              {getInitials(activeChat?.name || "?")}
+            <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center shrink-0">
+              {activeChat?.avatar_url
+                ? <img src={activeChat.avatar_url} alt={activeChat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                : <span className="text-white text-xs font-bold">{getInitials(activeChat?.name || "?")}</span>
+              }
             </div>
             <div>
               <div className="text-foreground font-semibold text-[14px]">{activeChat?.name || "..."}</div>

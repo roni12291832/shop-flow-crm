@@ -67,6 +67,11 @@ ALTER TABLE public.stage_followup_messages  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stage_followup_schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stage_followup_logs      ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "auth_stage_steps"     ON public.stage_followup_steps;
+DROP POLICY IF EXISTS "auth_stage_messages"  ON public.stage_followup_messages;
+DROP POLICY IF EXISTS "auth_stage_schedules" ON public.stage_followup_schedules;
+DROP POLICY IF EXISTS "auth_stage_logs"      ON public.stage_followup_logs;
+
 CREATE POLICY "auth_stage_steps"     ON public.stage_followup_steps     FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_stage_messages"  ON public.stage_followup_messages  FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "auth_stage_schedules" ON public.stage_followup_schedules FOR ALL TO authenticated USING (true) WITH CHECK (true);
