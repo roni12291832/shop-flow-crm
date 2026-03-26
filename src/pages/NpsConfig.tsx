@@ -138,9 +138,9 @@ export default function NpsConfig() {
         )}
 
         <div>
-          <Label>URL do Webhook N8N</Label>
+          <Label>URL do Webhook (Python)</Label>
           <Input value={settings.webhook_url} onChange={e => setSettings(s => ({ ...s, webhook_url: e.target.value.slice(0, 500) }))}
-            placeholder="https://n8n.exemplo.com/webhook/nps" className="mt-1" maxLength={500} />
+            placeholder="https://seu-backend.koyeb.app/webhook/nps" className="mt-1" maxLength={500} />
         </div>
 
         <Button onClick={handleSave} disabled={saving} className="w-full">

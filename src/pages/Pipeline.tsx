@@ -138,7 +138,7 @@ export default function Pipeline() {
       title: editForm.title, estimated_value: parseFloat(editForm.estimated_value) || 0,
     }).eq("id", editForm.id);
 
-    const promises: Promise<any>[] = [oppUpdate];
+    const promises: any[] = [oppUpdate];
 
     if (editForm.client_id) {
       const clientUpdate = supabase.from("clients").update({
@@ -147,7 +147,7 @@ export default function Pipeline() {
         email: editForm.client_email || null,
         city: editForm.client_city || null,
         notes: editForm.client_notes || null,
-        origin: editForm.origin,
+        origin: editForm.origin as any,
       }).eq("id", editForm.client_id);
       promises.push(clientUpdate);
     }
@@ -166,38 +166,47 @@ export default function Pipeline() {
 
   const handleSendBulk = async () => {
     if (!bulkStage || !bulkText) return;
-    const targetOpps = opportunities.filter(o => o.stage === bulkStage.value && o.client_phone);
-    if (targetOpps.length === 0) {
-      toast.error("Nenhum contato com telefone nesta etapa!");
-      return;
-    }
-
-    const webhookUrl = localStorage.getItem(`whatsapp_n8n_send_webhook`);
-    if (!webhookUrl) {
-      toast.error("URL do Webhook N8N não configurada! Ajuste em Conectar WhatsApp.");
-      return;
-    }
-
     setBulkSending(true);
-    let successCount = 0;
-    
-    // Process purely client-side firing webhooks for each lead
-    for (const opp of targetOpps) {
-      try {
-        await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ number: opp.client_phone, text: bulkText })
-        });
-        successCount++;
-      } catch (err) {
-        console.error("Erro ao enviar msg mkt:", err);
+    try {
+      // 1. Gerar variações com Jarvis (Anti-Ban)
+      const varRes = await fetch(`${PYTHON_BACKEND_URL}/jarvis/variations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: bulkText })
+      });
+      const varData = await varRes.json();
+      
+      if (!varData.variations) {
+        throw new Error("Falha ao gerar variações da mensagem");
       }
-    }
 
-    setBulkSending(false);
-    setBulkDialogOpen(false);
-    toast.success(`Mensagens enviadas para ${successCount} leads!`);
+      const variations = varData.variations.split(" ||| ");
+
+      // 2. Disparar Campanha via Python
+      const dispatchRes = await fetch(`${PYTHON_BACKEND_URL}/campaigns/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `Disparo ${bulkStage.label} - ${new Date().toLocaleDateString()}`,
+          messages: variations,
+          target_stages: [bulkStage.value]
+        })
+      });
+
+      if (!dispatchRes.ok) {
+        const errorData = await dispatchRes.json();
+        throw new Error(errorData.detail || "Erro ao disparar campanha");
+      }
+
+      const result = await dispatchRes.json();
+      toast.success(`${result.sent} mensagens enviadas com sucesso!`);
+      setBulkDialogOpen(false);
+    } catch (err: any) {
+      console.error("Erro no disparo:", err);
+      toast.error(err.message || "Erro ao processar disparo");
+    } finally {
+      setBulkSending(false);
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, oppId: string) => {
