@@ -211,6 +211,33 @@ class UazapiClient:
                 return {"error": str(e)}
         return {"error": "Falha desconhecida ao deletar chat"}
 
+    async def delete_instance(
+        self,
+        api_url: str,
+        api_token: str,
+        instance_token: str | None = None,
+    ) -> dict:
+        """
+        Deleta a instância do sistema UAZAPI.
+        Endpoint: DELETE /instance
+        """
+        url = f"{api_url.rstrip('/')}/instance"
+        token = instance_token or api_token
+        headers = {
+            "token": token,
+            "Accept": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.delete(url, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao deletar instância UAZAPI: {e}")
+                return {"error": str(e)}
+        return {"error": "Falha desconhecida ao deletar instância"}
+
     async def send_bulk_campaign(
         self,
         api_url: str,
@@ -240,7 +267,7 @@ class UazapiClient:
         for i, contact in enumerate(shuffled_contacts):
             phone = contact.get("phone", "")
             if not phone:
-                results["failed"] += 1
+                results["failed"] = (results.get("failed") or 0) + 1
                 continue
 
             msg_template = random.choice(messages)
@@ -250,11 +277,12 @@ class UazapiClient:
                 api_url, api_token, instance_name, phone, personalized_msg, instance_token
             )
             if "error" in resp:
-                results["failed"] += 1
-                if isinstance(results.get("errors"), list):
-                    results["errors"].append({"phone": phone, "error": resp["error"]})
+                results["failed"] = (results.get("failed") or 0) + 1
+                errs = results.get("errors")
+                if isinstance(errs, list):
+                    errs.append({"phone": phone, "error": resp["error"]})
             else:
-                results["sent"] += 1
+                results["sent"] = (results.get("sent") or 0) + 1
 
             if i < len(shuffled_contacts) - 1:
                 delay = random.uniform(min_delay, max_delay)
@@ -350,6 +378,7 @@ class UazapiClient:
             except Exception as e:
                 logger.error("Erro ao buscar chats: %s", e)
                 return []
+        return []
 
     # ─── Mensagens ────────────────────────────────────────────────────────
 
@@ -410,6 +439,7 @@ class UazapiClient:
             except Exception as e:
                 logger.error("Erro ao buscar mensagens de %s: %s", chat_id, e)
                 return []
+        return []
 
     # ─── Normalização ─────────────────────────────────────────────────────
 

@@ -448,3 +448,29 @@ async def delete_conversation(body: DeleteChatBody):
         raise HTTPException(status_code=502, detail=f"Erro ao deletar conversa: {result['error']}")
 
     return {"status": "ok", "result": result}
+
+
+@router.delete("/instance")
+async def disconnect_whatsapp():
+    """Desconecta o WhatsApp e remove a instância da UAZAPI e do Banco de Dados."""
+    instance = _get_active_instance()
+
+    # 1. Deleta na UAZAPI
+    uaz_res = await uazapi.delete_instance(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        instance_token=instance.get("instance_token")
+    )
+
+    # 2. Deleta no Supabase
+    try:
+        db = get_supabase()
+        db.table("whatsapp_instances").delete().eq("instance_name", instance["instance_name"]).execute()
+    except Exception as e:
+        logger.error(f"Erro ao remover instância do banco: {e}")
+
+    return {
+        "status": "ok",
+        "uazapi_response": uaz_res,
+        "message": "Instância desconectada e removida com sucesso."
+    }
