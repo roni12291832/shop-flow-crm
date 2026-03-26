@@ -22,7 +22,7 @@ from supabase_client import get_supabase
 from uazapi_client import uazapi
 from jarvis_agent import jarvis
 from config import get_settings
-from followup_engine import cancel_pending_for_client, schedule_followup_for_lead
+from followup_engine import cancel_pending_for_client
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 
@@ -166,10 +166,6 @@ async def receive_whatsapp_message(request: Request):
     if from_me:
         return {"status": "ignored", "reason": "mensagem própria"}
 
-    # Cliente respondeu → cancela follow-ups pendentes deste número
-    # (cancelamos antes mesmo de confirmar o client_id para não perder o contexto)
-    _followup_cancel_pending_phone = phone  # usado após identificar client_id abaixo
-
     phone = remote_jid.replace("@s.whatsapp.net", "").replace("@c.us", "")
     if not phone or len(phone) < 10:
         return {"status": "ignored", "reason": "número inválido"}
@@ -296,15 +292,6 @@ async def receive_whatsapp_message(request: Request):
                     if ins.data:
                         opportunity_action = "created_lead_novo"
                         logger.info("Oportunidade 'lead_novo' criada para %s (%s)", push_name, phone)
-                        # Agenda sequência de follow-up para o novo lead
-                        try:
-                            opp_id = ins.data[0]["id"]
-                            scheduled = await schedule_followup_for_lead(client_id, opp_id)
-                            if scheduled:
-                                logger.info("Sequência follow-up criada: %d steps para %s", scheduled, push_name)
-                            opportunity_action = f"created_lead_novo|followup_{scheduled}"
-                        except Exception as e:
-                            logger.warning("Erro ao agendar follow-up (não crítico): %s", e)
                     else:
                         opportunity_action = "create_failed"
                         logger.error("Falha ao criar oportunidade para %s: %s", push_name, ins)

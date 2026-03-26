@@ -1,17 +1,17 @@
 from __future__ import annotations
 """
-Motor de Follow-Up Automático.
+Motor de Follow-Up por Etapa do Pipeline.
 
-Processa a fila de mensagens agendadas (followup_schedules) e dispara
-via UAZAPI respeitando:
-  - Janela horária 08h–18h (horário de Brasília, UTC-3)
-  - Limite de 25 mensagens/dia (anti-bloqueio WhatsApp)
-  - Delays aleatórios entre 3–30s entre envios
-  - Cancelamento automático se cliente respondeu ou avançou no Pipeline
-
-Chamado pelo APScheduler a cada hora em main.py.
+Regras:
+  - Disparos somente 08h–18h (horário Brasília, UTC-3)
+  - Máximo 25 leads/dia POR ETAPA (não total)
+  - Delay aleatório entre envios (anti-ban)
+  - Variação de mensagem diferente por lead (dentro do mesmo step)
+  - Nunca repete a mesma variação ao mesmo lead no mesmo step
+  - Cancela tudo quando lead muda de etapa
+  - Após step 4 de contato_iniciado sem resposta → move para perdido automaticamente
+  - Jitter aleatório no horário agendado (±delay_jitter_hours)
 """
-
 import asyncio
 import random
 from datetime import datetime, timezone, timedelta
@@ -20,197 +20,290 @@ from core import logger, DRY_RUN, registrar_automacao, alertar_dono
 from supabase_client import get_supabase
 from uazapi_client import uazapi
 
-# Brasil = UTC-3 fixo (sem DST desde 2019)
 BRT = timezone(timedelta(hours=-3))
-
-# Janela horária permitida (horário Brasília)
-WINDOW_START_HOUR = 8   # 08:00
-WINDOW_END_HOUR   = 18  # 18:00 (não envia às 18h em diante)
-
-# Limite diário de disparos (todas as conversas somadas)
-DAILY_LIMIT = 25
-
-# Stages que indicam que o lead evoluiu ou foi fechado — cancela follow-ups
-CANCEL_STAGES = {"interessado", "comprador", "perdido", "desqualificado"}
+WINDOW_START = 8   # 08h BRT
+WINDOW_END   = 18  # 18h BRT
+DAILY_LIMIT_PER_STAGE = 25
 
 
 def _is_within_window() -> bool:
-    """Verifica se estamos dentro da janela de envio 08h–18h (BRT)."""
-    now_brt = datetime.now(BRT)
-    return WINDOW_START_HOUR <= now_brt.hour < WINDOW_END_HOUR
+    h = datetime.now(BRT).hour
+    return WINDOW_START <= h < WINDOW_END
 
 
-def _sent_today(db) -> int:
-    """Conta quantas mensagens já foram enviadas hoje via followup."""
-    today_brt = datetime.now(BRT).date().isoformat()
+def _sent_today_for_stage(db, stage: str) -> int:
+    today = datetime.now(BRT).date().isoformat()
     res = (
-        db.table("followup_logs")
+        db.table("stage_followup_logs")
         .select("id", count="exact")
+        .eq("stage", stage)
         .eq("status", "sent")
-        .gte("sent_at", f"{today_brt}T00:00:00-03:00")
+        .gte("sent_at", f"{today}T00:00:00-03:00")
         .execute()
     )
     return res.count or 0
 
 
-def _personalize(message: str, client: dict) -> str:
-    """Substitui variáveis de template pela info real do cliente."""
-    name = client.get("name", "").split()[0] if client.get("name") else "Olá"
-    return (
-        message
-        .replace("{nome}", name)
-        .replace("{name}", name)
-        .replace("{phone}", client.get("phone", ""))
+def _pick_variation(db, step_id: str, already_used: set[str]) -> dict | None:
+    """Escolhe variação aleatória não usada anteriormente por este lead neste step."""
+    all_vars = (
+        db.table("stage_followup_messages")
+        .select("id, message")
+        .eq("step_id", step_id)
+        .execute()
     )
+    available = [v for v in (all_vars.data or []) if v["id"] not in already_used]
+    if not available:
+        # Todas usadas — permite reusar
+        available = all_vars.data or []
+    if not available:
+        return None
+    return random.choice(available)
 
 
-async def cancel_pending_for_client(client_id: str, reason: str = "cliente_respondeu") -> int:
+def _personalize(message: str, client: dict) -> str:
+    first = (client.get("name") or "").split()[0] or "Olá"
+    return message.replace("{nome}", first).replace("{name}", first)
+
+
+def _schedule_time(base: datetime, jitter_hours: int) -> datetime:
+    """Aplica jitter aleatório ao tempo agendado para variar horários de disparo."""
+    if jitter_hours <= 0:
+        return base
+    delta_minutes = random.randint(-jitter_hours * 60, jitter_hours * 60)
+    return base + timedelta(minutes=delta_minutes)
+
+
+async def on_stage_change(
+    client_id: str,
+    opportunity_id: str,
+    new_stage: str,
+    old_stage: str | None = None,
+) -> dict:
     """
-    Cancela todos os follow-ups pendentes de um cliente.
-    Chamado pelo webhook quando o cliente envia uma mensagem.
-    Retorna quantos foram cancelados.
+    Chamado quando uma oportunidade muda de etapa.
+    1. Cancela TODOS os schedules pendentes anteriores
+    2. Cria novos schedules para a nova etapa (se aplicável)
     """
     db = get_supabase()
+    cancelled = 0
+
+    # 1. Cancela pendentes de qualquer etapa anterior
     try:
         res = (
-            db.table("followup_schedules")
-            .update({"status": "cancelled", "cancel_reason": reason})
-            .eq("client_id", client_id)
+            db.table("stage_followup_schedules")
+            .update({"status": "cancelled", "cancel_reason": f"stage_changed_to_{new_stage}"})
+            .eq("opportunity_id", opportunity_id)
             .eq("status", "pending")
             .execute()
         )
         cancelled = len(res.data or [])
         if cancelled:
             logger.info(
-                "Follow-ups cancelados para cliente %s (%d agendamentos, motivo: %s)",
-                client_id, cancelled, reason,
+                "Cancelados %d follow-ups pendentes para opp %s (mudou de %s → %s)",
+                cancelled, opportunity_id, old_stage, new_stage,
             )
-        return cancelled
     except Exception as e:
-        logger.warning("Erro ao cancelar follow-ups do cliente %s: %s", client_id, e)
-        return 0
+        logger.warning("Erro ao cancelar follow-ups anteriores: %s", e)
 
+    # 2. Estágios que NÃO entram em follow-up
+    if new_stage in ("lead_novo", "perdido", "desqualificado"):
+        return {"scheduled": 0, "cancelled": cancelled}
 
-async def schedule_followup_for_lead(
-    client_id: str,
-    opportunity_id: str | None = None,
-) -> int:
-    """
-    Cria agendamentos de follow-up para um lead recém-criado.
-    Busca o template ativo e agenda cada step conforme delay_hours.
-    Retorna quantos agendamentos foram criados.
-    """
-    db = get_supabase()
-
-    # Verifica se já tem agendamentos pendentes para este cliente
-    existing = (
-        db.table("followup_schedules")
-        .select("id")
-        .eq("client_id", client_id)
-        .eq("status", "pending")
-        .limit(1)
-        .execute()
-    )
-    if existing.data:
-        logger.info("Cliente %s já tem follow-ups agendados — ignorando", client_id)
-        return 0
-
-    # Busca template ativo
-    tmpl_res = (
-        db.table("followup_templates")
-        .select("id")
-        .eq("is_active", True)
-        .limit(1)
-        .execute()
-    )
-    if not tmpl_res.data:
-        logger.info("Nenhum template de follow-up ativo — sequência não criada para cliente %s", client_id)
-        return 0
-
-    template_id = tmpl_res.data[0]["id"]
-
-    # Busca steps do template ordenados por step_number
+    # 3. Busca steps da nova etapa
     steps_res = (
-        db.table("followup_steps")
-        .select("id, step_number, delay_hours")
-        .eq("template_id", template_id)
+        db.table("stage_followup_steps")
+        .select("id, step_number, delay_hours, delay_jitter_hours, min_variations")
+        .eq("stage", new_stage)
         .order("step_number")
         .execute()
     )
     steps = steps_res.data or []
     if not steps:
-        logger.info("Template %s sem steps — nenhum agendamento criado", template_id)
-        return 0
+        logger.info("Nenhum step configurado para etapa '%s'", new_stage)
+        return {"scheduled": 0, "cancelled": cancelled}
 
-    now = datetime.now(timezone.utc)
-    accumulated_hours = 0
+    # 4. Verifica variações mínimas
     inserts = []
+    now_utc = datetime.now(timezone.utc)
 
     for step in steps:
-        accumulated_hours += step["delay_hours"]
-        scheduled_for = now + timedelta(hours=accumulated_hours)
+        # Verifica quantidade de variações
+        count_res = (
+            db.table("stage_followup_messages")
+            .select("id", count="exact")
+            .eq("step_id", step["id"])
+            .execute()
+        )
+        var_count = count_res.count or 0
+        if var_count < step["min_variations"]:
+            logger.warning(
+                "Step %d de '%s' tem %d/%d variações — skip (adicione mais mensagens)",
+                step["step_number"], new_stage, var_count, step["min_variations"],
+            )
+            continue
+
+        # Busca variação já usada por este cliente neste step
+        used_res = (
+            db.table("stage_followup_schedules")
+            .select("message_variation_id")
+            .eq("client_id", client_id)
+            .eq("step_id", step["id"])
+            .not_.is_("message_variation_id", "null")
+            .execute()
+        )
+        already_used = {r["message_variation_id"] for r in (used_res.data or [])}
+        variation = _pick_variation(db, step["id"], already_used)
+
+        base_time = now_utc + timedelta(hours=step["delay_hours"])
+        scheduled = _schedule_time(base_time, step.get("delay_jitter_hours", 1))
+
         inserts.append({
             "client_id": client_id,
-            "step_id": step["id"],
             "opportunity_id": opportunity_id,
-            "scheduled_for": scheduled_for.isoformat(),
+            "step_id": step["id"],
+            "stage": new_stage,
+            "step_number": step["step_number"],
+            "scheduled_for": scheduled.isoformat(),
             "status": "pending",
+            "message_variation_id": variation["id"] if variation else None,
         })
 
-    if DRY_RUN:
-        logger.info("[DRY_RUN] Criaria %d agendamentos para cliente %s", len(inserts), client_id)
-        return len(inserts)
+    if not inserts:
+        return {"scheduled": 0, "cancelled": cancelled}
 
-    res = db.table("followup_schedules").insert(inserts).execute()
+    if DRY_RUN:
+        logger.info("[DRY_RUN] Criaria %d agendamentos para opp %s na etapa '%s'", len(inserts), opportunity_id, new_stage)
+        return {"scheduled": len(inserts), "cancelled": cancelled}
+
+    res = db.table("stage_followup_schedules").insert(inserts).execute()
     created = len(res.data or [])
-    logger.info("Criados %d agendamentos de follow-up para cliente %s", created, client_id)
-    return created
+    logger.info("Criados %d agendamentos para opp %s na etapa '%s'", created, opportunity_id, new_stage)
+    return {"scheduled": created, "cancelled": cancelled}
+
+
+async def _auto_move_expired(db) -> int:
+    """Verifica steps com auto_move_to e move oportunidades sem resposta."""
+    now_utc = datetime.now(timezone.utc).isoformat()
+    moved = 0
+
+    # Busca steps com auto_move_to configurado
+    steps_res = (
+        db.table("stage_followup_steps")
+        .select("id, stage, auto_move_to")
+        .not_.is_("auto_move_to", "null")
+        .execute()
+    )
+
+    for step in (steps_res.data or []):
+        # Acha schedules desse step que foram enviados E a opp ainda está na mesma etapa
+        sent_res = (
+            db.table("stage_followup_schedules")
+            .select("opportunity_id")
+            .eq("step_id", step["id"])
+            .eq("status", "sent")
+            .execute()
+        )
+        for sched in (sent_res.data or []):
+            opp_id = sched["opportunity_id"]
+            # Verifica se a opp ainda está na etapa original
+            opp_res = (
+                db.table("opportunities")
+                .select("id, stage, client_id")
+                .eq("id", opp_id)
+                .eq("stage", step["stage"])
+                .limit(1)
+                .execute()
+            )
+            if not opp_res.data:
+                continue  # já avançou
+
+            # Verifica se ainda tem schedules pendentes para esta opp (lead respondeu = teria sido cancelado)
+            pending_res = (
+                db.table("stage_followup_schedules")
+                .select("id")
+                .eq("opportunity_id", opp_id)
+                .eq("status", "pending")
+                .limit(1)
+                .execute()
+            )
+            if pending_res.data:
+                continue  # ainda tem pendentes, não mover
+
+            # Sem pendentes e está no mesmo stage → move
+            if not DRY_RUN:
+                db.table("opportunities").update({
+                    "stage": step["auto_move_to"],
+                }).eq("id", opp_id).execute()
+                db.table("stage_followup_logs").insert({
+                    "client_id": opp_res.data[0]["client_id"],
+                    "opportunity_id": opp_id,
+                    "step_id": step["id"],
+                    "stage": step["stage"],
+                    "status": "auto_moved",
+                    "message_sent": f"Auto-movido para '{step['auto_move_to']}'",
+                }).execute()
+                logger.info("Opp %s auto-movida de '%s' para '%s'", opp_id, step["stage"], step["auto_move_to"])
+                moved += 1
+
+    return moved
+
+
+async def cancel_pending_for_opportunity(opportunity_id: str, reason: str = "respondeu") -> int:
+    """Cancela todos os follow-ups pendentes de uma oportunidade (quando cliente responde)."""
+    db = get_supabase()
+    try:
+        res = (
+            db.table("stage_followup_schedules")
+            .update({"status": "cancelled", "cancel_reason": reason})
+            .eq("opportunity_id", opportunity_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        count = len(res.data or [])
+        if count:
+            logger.info("Cancelados %d follow-ups para opp %s (%s)", count, opportunity_id, reason)
+        return count
+    except Exception as e:
+        logger.warning("Erro ao cancelar follow-ups: %s", e)
+        return 0
+
+
+async def cancel_pending_for_client(client_id: str, reason: str = "respondeu") -> int:
+    """Cancela todos os follow-ups pendentes de um cliente (quando responde via webhook)."""
+    db = get_supabase()
+    try:
+        res = (
+            db.table("stage_followup_schedules")
+            .update({"status": "cancelled", "cancel_reason": reason})
+            .eq("client_id", client_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        count = len(res.data or [])
+        if count:
+            logger.info("Cancelados %d follow-ups para cliente %s (%s)", count, client_id, reason)
+        return count
+    except Exception as e:
+        logger.warning("Erro ao cancelar follow-ups do cliente: %s", e)
+        return 0
 
 
 async def job_process_followups() -> None:
-    """
-    Job principal — processa todos os follow-ups pendentes e devidos.
-    Chamado pelo APScheduler a cada hora.
-    """
-    async with registrar_automacao("followup_engine"):
+    """Job principal — processa fila de follow-ups. Roda a cada hora via APScheduler."""
+    async with registrar_automacao("stage_followup_engine"):
         if not _is_within_window():
-            logger.info(
-                "Follow-up: fora da janela horária (08h–18h BRT) — aguardando próxima execução"
-            )
+            logger.info("Follow-up: fora da janela 08h–18h BRT — aguardando")
             return
 
         db = get_supabase()
 
-        sent_today = _sent_today(db)
-        if sent_today >= DAILY_LIMIT:
-            logger.info(
-                "Follow-up: limite diário atingido (%d/%d) — aguardando amanhã",
-                sent_today, DAILY_LIMIT,
-            )
-            return
+        # Auto-move leads expirados
+        moved = await _auto_move_expired(db)
+        if moved:
+            logger.info("Follow-up: %d leads auto-movidos por expiração", moved)
 
-        remaining = DAILY_LIMIT - sent_today
-        now_utc = datetime.now(timezone.utc).isoformat()
-
-        # Busca follow-ups pendentes com scheduled_for <= agora
-        pending_res = (
-            db.table("followup_schedules")
-            .select("id, client_id, step_id, opportunity_id")
-            .eq("status", "pending")
-            .lte("scheduled_for", now_utc)
-            .order("scheduled_for")
-            .limit(remaining)
-            .execute()
-        )
-        pending = pending_res.data or []
-
-        if not pending:
-            logger.info("Follow-up: nenhum agendamento pendente no momento")
-            return
-
-        logger.info("Follow-up: %d agendamentos para processar (limite restante: %d)", len(pending), remaining)
-
-        # Busca instância WhatsApp conectada
+        # Busca instância WA conectada
         wp_res = (
             db.table("whatsapp_instances")
             .select("api_url, api_token, instance_name, instance_token")
@@ -219,133 +312,115 @@ async def job_process_followups() -> None:
             .execute()
         )
         if not wp_res.data:
-            logger.warning("Follow-up: nenhuma instância WhatsApp conectada — abortando")
+            logger.warning("Follow-up: nenhuma instância WhatsApp conectada")
             return
-
         wp = wp_res.data[0]
 
-        for i, schedule in enumerate(pending):
-            client_id    = schedule["client_id"]
-            step_id      = schedule["step_id"]
-            opp_id       = schedule.get("opportunity_id")
-            schedule_id  = schedule["id"]
+        now_utc = datetime.now(timezone.utc).isoformat()
 
-            # Verifica se o cliente avançou para um stage que cancela o follow-up
-            if opp_id:
-                opp_res = (
-                    db.table("opportunities")
-                    .select("stage")
-                    .eq("id", opp_id)
-                    .limit(1)
-                    .execute()
+        for stage in ("contato_iniciado", "interessado", "comprador"):
+            sent_today = _sent_today_for_stage(db, stage)
+            remaining = DAILY_LIMIT_PER_STAGE - sent_today
+            if remaining <= 0:
+                logger.info("Follow-up '%s': limite diário atingido (%d/25)", stage, sent_today)
+                continue
+
+            pending_res = (
+                db.table("stage_followup_schedules")
+                .select("id, client_id, opportunity_id, step_id, step_number, message_variation_id")
+                .eq("stage", stage)
+                .eq("status", "pending")
+                .lte("scheduled_for", now_utc)
+                .order("scheduled_for")
+                .limit(remaining)
+                .execute()
+            )
+            pending = pending_res.data or []
+            if not pending:
+                continue
+
+            logger.info("Follow-up '%s': %d agendamentos para processar", stage, len(pending))
+
+            for i, sched in enumerate(pending):
+                client_res = (
+                    db.table("clients").select("id, name, phone").eq("id", sched["client_id"]).limit(1).execute()
                 )
-                if opp_res.data:
-                    stage = opp_res.data[0]["stage"]
-                    if stage in CANCEL_STAGES:
-                        db.table("followup_schedules").update({
-                            "status": "cancelled",
-                            "cancel_reason": f"stage_{stage}",
-                        }).eq("id", schedule_id).execute()
-                        logger.info(
-                            "Follow-up %s cancelado: oportunidade em stage '%s'",
-                            schedule_id, stage,
-                        )
+                if not client_res.data:
+                    db.table("stage_followup_schedules").update({"status": "cancelled", "cancel_reason": "cliente_nao_encontrado"}).eq("id", sched["id"]).execute()
+                    continue
+
+                client = client_res.data[0]
+                phone = client.get("phone", "")
+                if not phone:
+                    db.table("stage_followup_schedules").update({"status": "cancelled", "cancel_reason": "sem_telefone"}).eq("id", sched["id"]).execute()
+                    continue
+
+                # Busca mensagem da variação pre-alocada
+                var_id = sched.get("message_variation_id")
+                message_text = None
+                if var_id:
+                    var_res = db.table("stage_followup_messages").select("message").eq("id", var_id).limit(1).execute()
+                    if var_res.data:
+                        message_text = _personalize(var_res.data[0]["message"], client)
+
+                if not message_text:
+                    # Fallback: escolhe qualquer variação
+                    step_msgs = db.table("stage_followup_messages").select("message").eq("step_id", sched["step_id"]).execute()
+                    if step_msgs.data:
+                        message_text = _personalize(random.choice(step_msgs.data)["message"], client)
+                    else:
+                        db.table("stage_followup_schedules").update({"status": "skipped", "cancel_reason": "sem_mensagens"}).eq("id", sched["id"]).execute()
+                        logger.warning("Follow-up step %d de '%s' sem mensagens cadastradas — pulando", sched["step_number"], stage)
                         continue
 
-            # Busca dados do cliente e mensagem do step
-            client_res = (
-                db.table("clients")
-                .select("id, name, phone")
-                .eq("id", client_id)
-                .limit(1)
-                .execute()
-            )
-            step_res = (
-                db.table("followup_steps")
-                .select("message, step_number")
-                .eq("id", step_id)
-                .limit(1)
-                .execute()
-            )
+                status = "sent"
+                error  = None
 
-            if not client_res.data or not step_res.data:
-                db.table("followup_schedules").update({
-                    "status": "cancelled",
-                    "cancel_reason": "dados_nao_encontrados",
-                }).eq("id", schedule_id).execute()
-                continue
-
-            client = client_res.data[0]
-            step   = step_res.data[0]
-            phone  = client.get("phone", "")
-            if not phone:
-                db.table("followup_schedules").update({
-                    "status": "cancelled",
-                    "cancel_reason": "sem_telefone",
-                }).eq("id", schedule_id).execute()
-                continue
-
-            message = _personalize(step["message"], client)
-
-            # Envia
-            status = "sent"
-            error  = None
-            if DRY_RUN:
-                logger.info(
-                    "[DRY_RUN] Follow-up step %d para %s (%s): %.60s...",
-                    step["step_number"], client["name"], phone, message,
-                )
-            else:
-                try:
-                    resp = await uazapi.send_text(
-                        api_url=wp["api_url"],
-                        api_token=wp["api_token"],
-                        instance_name=wp["instance_name"],
-                        phone=phone,
-                        message=message,
-                        instance_token=wp.get("instance_token"),
-                    )
-                    if "error" in resp:
+                if DRY_RUN:
+                    logger.info("[DRY_RUN] Follow-up step %d '%s' para %s: %.60s...", sched["step_number"], stage, client["name"], message_text)
+                else:
+                    try:
+                        resp = await uazapi.send_text(
+                            api_url=wp["api_url"],
+                            api_token=wp["api_token"],
+                            instance_name=wp["instance_name"],
+                            phone=phone,
+                            message=message_text,
+                            instance_token=wp.get("instance_token"),
+                        )
+                        if "error" in resp:
+                            status = "failed"
+                            error = str(resp["error"])
+                        else:
+                            logger.info("Follow-up step %d '%s' enviado para %s (%s)", sched["step_number"], stage, client["name"], phone)
+                    except Exception as e:
                         status = "failed"
-                        error  = str(resp["error"])
-                        logger.error(
-                            "Follow-up falhou para %s (%s): %s",
-                            client["name"], phone, error,
-                        )
-                    else:
-                        logger.info(
-                            "Follow-up step %d enviado para %s (%s)",
-                            step["step_number"], client["name"], phone,
-                        )
-                except Exception as e:
-                    status = "failed"
-                    error  = str(e)
-                    logger.error("Exceção ao enviar follow-up para %s: %s", phone, e)
+                        error = str(e)
+                        logger.error("Exceção no follow-up para %s: %s", phone, e)
 
-            sent_at = datetime.now(timezone.utc).isoformat()
-
-            # Atualiza schedule
-            db.table("followup_schedules").update({
-                "status": status,
-                "sent_at": sent_at if status == "sent" else None,
-                "cancel_reason": error if status == "failed" else None,
-            }).eq("id", schedule_id).execute()
-
-            # Registra no log
-            try:
-                db.table("followup_logs").insert({
-                    "client_id": client_id,
-                    "step_id": step_id,
-                    "message_sent": message,
+                sent_at = datetime.now(timezone.utc).isoformat()
+                db.table("stage_followup_schedules").update({
                     "status": status,
-                    "error": error,
-                    "sent_at": sent_at,
-                }).execute()
-            except Exception as e:
-                logger.warning("Erro ao salvar followup_log: %s", e)
+                    "sent_at": sent_at if status == "sent" else None,
+                    "cancel_reason": error if status == "failed" else None,
+                }).eq("id", sched["id"]).execute()
 
-            # Delay anti-ban (exceto no último)
-            if i < len(pending) - 1 and not DRY_RUN and status == "sent":
-                delay = random.choice([3, 8, 14, 21, 28])
-                logger.info("Anti-ban: aguardando %ds antes do próximo follow-up...", delay)
-                await asyncio.sleep(delay)
+                try:
+                    db.table("stage_followup_logs").insert({
+                        "client_id": sched["client_id"],
+                        "opportunity_id": sched["opportunity_id"],
+                        "step_id": sched["step_id"],
+                        "stage": stage,
+                        "step_number": sched["step_number"],
+                        "message_sent": message_text,
+                        "status": status,
+                        "error": error,
+                        "sent_at": sent_at,
+                    }).execute()
+                except Exception as e:
+                    logger.warning("Erro ao salvar log: %s", e)
+
+                if i < len(pending) - 1 and not DRY_RUN and status == "sent":
+                    delay = random.choice([4, 9, 15, 22, 31, 45])
+                    logger.info("Anti-ban: aguardando %ds...", delay)
+                    await asyncio.sleep(delay)

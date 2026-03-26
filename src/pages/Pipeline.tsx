@@ -15,6 +15,18 @@ import { toast } from "sonner";
 import { LossReasonDialog } from "@/components/crm/LossReasonDialog";
 import { Send } from "lucide-react";
 
+const PYTHON_BACKEND_URL = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app";
+
+async function notifyStageChange(clientId: string, opportunityId: string, newStage: string, oldStage?: string) {
+  try {
+    await fetch(`${PYTHON_BACKEND_URL}/followup/on-stage-change`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, opportunity_id: opportunityId, new_stage: newStage, old_stage: oldStage }),
+    });
+  } catch { /* silent — follow-up is not critical for UX */ }
+}
+
 const STAGES = [
   { value: "lead_novo", label: "Lead Novo", color: "hsl(var(--chart-1))" },
   { value: "contato_iniciado", label: "Contato Iniciado", color: "hsl(var(--chart-4))" },
@@ -82,15 +94,23 @@ export default function Pipeline() {
       setLossDialogOpen(true);
       return;
     }
+    const opp = opportunities.find(o => o.id === oppId);
     await supabase.from("opportunities").update({ stage: newStage as any }).eq("id", oppId);
+    if (opp?.client_id) {
+      notifyStageChange(opp.client_id, oppId, newStage, opp.stage);
+    }
     fetchData();
   };
 
   const confirmLoss = async (reason: string, notes: string) => {
     if (!pendingLossId) return;
+    const opp = opportunities.find(o => o.id === pendingLossId);
     await supabase.from("opportunities").update({
       stage: "perdido" as any, loss_reason: reason as any, loss_notes: notes || null,
     }).eq("id", pendingLossId);
+    if (opp?.client_id) {
+      notifyStageChange(opp.client_id, pendingLossId, "perdido", opp.stage);
+    }
     setLossDialogOpen(false);
     setPendingLossId(null);
     toast.info("Oportunidade marcada como perdida");
