@@ -24,6 +24,7 @@ const PAGE_TITLES: Record<string, { title: string; sub: string }> = {
   "/metas/configurar": { title: "Configurar Metas", sub: "Definição de Metas por Período" },
   "/catalogo": { title: "Catálogo", sub: "Gestão de Produtos e Grades" },
   "/trocas": { title: "Trocas & Devoluções", sub: "Fluxo de Logística Reversa" },
+  "/follow-up": { title: "Follow-Up Automático", sub: "Sequências para Leads Novos" },
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {

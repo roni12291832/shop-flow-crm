@@ -23,6 +23,8 @@ from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
+from followup_engine import job_process_followups
+from followup_router import router as followup_router
 
 
 async def _setup_webhooks_on_startup():
@@ -96,11 +98,21 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
+    # Follow-up automático — processa fila a cada hora
+    scheduler.add_job(
+        job_process_followups,
+        IntervalTrigger(hours=1),
+        id="followup_engine",
+        name="Motor de Follow-Up Automático",
+        replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("🚀 Scheduler iniciado com 3 jobs agendados")
+    logger.info("🚀 Scheduler iniciado com 4 jobs agendados")
     logger.info(f"   📊 Relatório diário: {s.report_hour}:{s.report_minute:02d}")
     logger.info("   🔄 Sync offline: a cada 6h")
     logger.info("   ⚠️  Leads parados: a cada 12h")
+    logger.info("   📲 Follow-up automático: a cada 1h")
 
     # Auto-configura webhook no UAZAPI para garantir que deploys não quebrem a integração
     asyncio.create_task(_setup_webhooks_on_startup())
@@ -140,6 +152,7 @@ app.add_middleware(
 app.include_router(webhooks_router)
 app.include_router(campaigns_router)
 app.include_router(whatsapp_router)
+app.include_router(followup_router)
 
 
 @app.get("/")

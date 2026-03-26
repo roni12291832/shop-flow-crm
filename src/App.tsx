@@ -26,6 +26,7 @@ import NpsPublic from "./pages/NpsPublic";
 import SellerMode from "./pages/SellerMode";
 import AdminPanel from "./pages/AdminPanel";
 import WhatsAppConnect from "./pages/WhatsAppConnect";
+import FollowUp from "./pages/FollowUp";
 import Inventory from "./pages/Inventory";
 import Catalog from "./pages/Catalog";
 import Exchanges from "./pages/Exchanges";
@@ -110,6 +111,7 @@ const AppRoutes = () => (
     <Route path="/metas" element={<AdminRoute><Goals /></AdminRoute>} />
     <Route path="/metas/configurar" element={<AdminRoute><GoalsConfig /></AdminRoute>} />
     <Route path="/regua-relacionamento" element={<AdminRoute><RelationshipRules /></AdminRoute>} />
+    <Route path="/follow-up" element={<AdminRoute><FollowUp /></AdminRoute>} />
     <Route path="/nps" element={<AdminRoute><NpsDashboard /></AdminRoute>} />
     <Route path="/nps/configurar" element={<AdminRoute><NpsConfig /></AdminRoute>} />
     <Route path="/nps/:token" element={<NpsPublic />} />
