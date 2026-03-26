@@ -61,9 +61,25 @@ def _pick_variation(db, step_id: str, already_used: set[str]) -> dict | None:
     return random.choice(available)
 
 
-def _personalize(message: str, client: dict) -> str:
+def _get_gmb_link(db) -> str:
+    """Busca o link do Google Meu Negócio cadastrado nas configurações do tenant."""
+    try:
+        res = db.table("tenants").select("google_mybusiness_url").limit(1).execute()
+        if res.data and res.data[0].get("google_mybusiness_url"):
+            return res.data[0]["google_mybusiness_url"]
+    except Exception:
+        pass
+    return ""
+
+
+def _personalize(message: str, client: dict, gmb_link: str = "") -> str:
     first = (client.get("name") or "").split()[0] or "Olá"
-    return message.replace("{nome}", first).replace("{name}", first)
+    return (
+        message
+        .replace("{nome}", first)
+        .replace("{name}", first)
+        .replace("{gmb_link}", gmb_link)
+    )
 
 
 def _schedule_time(base: datetime, jitter_hours: int) -> datetime:
@@ -317,6 +333,7 @@ async def job_process_followups() -> None:
         wp = wp_res.data[0]
 
         now_utc = datetime.now(timezone.utc).isoformat()
+        gmb_link = _get_gmb_link(db)
 
         for stage in ("contato_iniciado", "interessado", "comprador"):
             sent_today = _sent_today_for_stage(db, stage)
@@ -361,13 +378,13 @@ async def job_process_followups() -> None:
                 if var_id:
                     var_res = db.table("stage_followup_messages").select("message").eq("id", var_id).limit(1).execute()
                     if var_res.data:
-                        message_text = _personalize(var_res.data[0]["message"], client)
+                        message_text = _personalize(var_res.data[0]["message"], client, gmb_link)
 
                 if not message_text:
                     # Fallback: escolhe qualquer variação
                     step_msgs = db.table("stage_followup_messages").select("message").eq("step_id", sched["step_id"]).execute()
                     if step_msgs.data:
-                        message_text = _personalize(random.choice(step_msgs.data)["message"], client)
+                        message_text = _personalize(random.choice(step_msgs.data)["message"], client, gmb_link)
                     else:
                         db.table("stage_followup_schedules").update({"status": "skipped", "cancel_reason": "sem_mensagens"}).eq("id", sched["id"]).execute()
                         logger.warning("Follow-up step %d de '%s' sem mensagens cadastradas — pulando", sched["step_number"], stage)

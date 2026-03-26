@@ -12,7 +12,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Save, Building2, User, Palette, Users, Shield, UserPlus, Upload, X } from "lucide-react";
+import { Save, Building2, User, Palette, Users, Shield, UserPlus, Upload, X, Star } from "lucide-react";
 import { toast } from "sonner";
 
 interface TeamMember { user_id: string; name: string; email: string; role: string; }
@@ -21,7 +21,7 @@ const ROLE_LABELS: Record<string, string> = { admin: "Administrador", gerente: "
 export default function Settings() {
   const {  profile, user, hasRole } = useAuth();
   const isAdmin = hasRole("admin");
-  const [tenant, setTenant] = useState({ company_name: "", logo_url: "", primary_color: "#6366f1", secondary_color: "#8b5cf6" });
+  const [tenant, setTenant] = useState({ company_name: "", logo_url: "", primary_color: "#6366f1", secondary_color: "#8b5cf6", google_mybusiness_url: "" });
   const [profileForm, setProfileForm] = useState({ name: "", email: "" });
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [saving, setSaving] = useState(false);
@@ -33,8 +33,8 @@ export default function Settings() {
 
   useEffect(() => {
         const fetch_ = async () => {
-      const { data: t } = await supabase.from("tenants").select("company_name, logo_url, primary_color, secondary_color").single();
-      if (t) setTenant({ company_name: t.company_name || "", logo_url: t.logo_url || "", primary_color: t.primary_color || "#6366f1", secondary_color: t.secondary_color || "#8b5cf6" });
+      const { data: t } = await supabase.from("tenants").select("company_name, logo_url, primary_color, secondary_color, google_mybusiness_url").single();
+      if (t) setTenant({ company_name: t.company_name || "", logo_url: t.logo_url || "", primary_color: t.primary_color || "#6366f1", secondary_color: t.secondary_color || "#8b5cf6", google_mybusiness_url: (t as any).google_mybusiness_url || "" });
       const [{ data: profiles }, { data: roles }] = await Promise.all([
         supabase.from("profiles").select("user_id, name, email"),
         supabase.from("user_roles").select("user_id, role"),
@@ -88,7 +88,7 @@ export default function Settings() {
   const saveTenant = async () => {
     if (!isAdmin) return;
     setSaving(true);
-    const { error } = await supabase.from("tenants").update({ company_name: tenant.company_name, logo_url: tenant.logo_url || null, primary_color: tenant.primary_color, secondary_color: tenant.secondary_color });
+    const { error } = await supabase.from("tenants").update({ company_name: tenant.company_name, logo_url: tenant.logo_url || null, primary_color: tenant.primary_color, secondary_color: tenant.secondary_color, google_mybusiness_url: tenant.google_mybusiness_url || null } as any);
     setSaving(false);
     if (error) {
       toast.error("Erro ao salvar");
@@ -218,6 +218,19 @@ export default function Settings() {
                 <Input value={tenant.secondary_color} onChange={(e) => setTenant({ ...tenant, secondary_color: e.target.value })} className="font-mono text-sm" />
               </div>
             </div>
+          </div>
+          <Separator className="bg-border" />
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5"><Star className="h-4 w-4 text-yellow-500" /> Google Meu Negócio</Label>
+            <Input
+              placeholder="https://g.page/r/sua-empresa/review"
+              value={tenant.google_mybusiness_url}
+              onChange={(e) => setTenant({ ...tenant, google_mybusiness_url: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Link da página de avaliações do Google. Usado automaticamente nas mensagens de satisfação de compradores.
+              Use <code className="bg-muted px-1 rounded text-[11px]">{"{gmb_link}"}</code> nas mensagens do step "Comprador".
+            </p>
           </div>
           <Button onClick={saveTenant} disabled={saving} className="gap-1.5"><Save className="h-4 w-4" /> Salvar</Button>
         </div>
