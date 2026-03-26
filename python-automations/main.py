@@ -23,8 +23,16 @@ from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
-from followup_engine import job_process_followups
-from followup_router import router as followup_router
+try:
+    from followup_engine import job_process_followups
+    from followup_router import router as followup_router
+    _FOLLOWUP_ENABLED = True
+except Exception as _fe:
+    import logging as _logging
+    _logging.getLogger("shopflow").error("FALHA ao importar followup: %s", _fe)
+    followup_router = None  # type: ignore
+    job_process_followups = None  # type: ignore
+    _FOLLOWUP_ENABLED = False
 
 
 async def _setup_webhooks_on_startup():
@@ -99,13 +107,14 @@ async def lifespan(app: FastAPI):
     )
 
     # Follow-up automático — processa fila a cada hora
-    scheduler.add_job(
-        job_process_followups,
-        IntervalTrigger(hours=1),
-        id="followup_engine",
-        name="Motor de Follow-Up Automático",
-        replace_existing=True,
-    )
+    if _FOLLOWUP_ENABLED and job_process_followups:
+        scheduler.add_job(
+            job_process_followups,
+            IntervalTrigger(hours=1),
+            id="followup_engine",
+            name="Motor de Follow-Up Automático",
+            replace_existing=True,
+        )
 
     scheduler.start()
     logger.info("🚀 Scheduler iniciado com 4 jobs agendados")
@@ -152,7 +161,8 @@ app.add_middleware(
 app.include_router(webhooks_router)
 app.include_router(campaigns_router)
 app.include_router(whatsapp_router)
-app.include_router(followup_router)
+if _FOLLOWUP_ENABLED and followup_router:
+    app.include_router(followup_router)
 
 
 @app.get("/")
