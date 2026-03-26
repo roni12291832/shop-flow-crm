@@ -135,7 +135,7 @@ app = FastAPI(
         "- 📊 Relatório diário automático via WhatsApp\n"
         "- 🔄 Sincronização de mensagens offline\n"
     ),
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
