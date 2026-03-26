@@ -103,7 +103,7 @@ async def debug_whatsapp():
             "Content-Type": "application/json",
         }
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(url, json={"count": 5}, headers=headers)
+            resp = await client.post(url, json={"limit": 5}, headers=headers)
             raw_chats_sample = {
                 "status_code": resp.status_code,
                 "response_preview": str(resp.text[:500]),
