@@ -19,6 +19,40 @@ from uazapi_client import uazapi
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
 
+class SendMessageBody(BaseModel):
+    chat_id: str
+    message: str
+
+
+class SendMediaBody(BaseModel):
+    chat_id: str
+    media_type: str  # image, video, audio, document, sticker, ptt, etc
+    file: str  # URL or base64
+    text: str | None = None  # caption
+    doc_name: str | None = None
+    delay: int | None = None
+    reply_id: str | None = None
+
+
+class SendLocationBody(BaseModel):
+    chat_id: str
+    latitude: float
+    longitude: float
+    name: str | None = None
+    address: str | None = None
+
+
+class DeleteMessageBody(BaseModel):
+    message_id: str
+
+
+class DeleteChatBody(BaseModel):
+    chat_id: str
+    delete_chat_db: bool = True
+    delete_messages_db: bool = True
+    delete_chat_whatsapp: bool = True
+
+
 def _get_active_instance() -> dict:
     """Busca a instância WhatsApp conectada no Supabase. Lança 503 se nenhuma disponível."""
     db = get_supabase()
@@ -240,12 +274,7 @@ async def get_conversation_messages(
     }
 
 
-# ─── Envio manual ─────────────────────────────────────────────────────────────
-
-class SendMessageBody(BaseModel):
-    chat_id: str
-    message: str
-
+# ─── Envio de mensagens ───────────────────────────────────────────────────────
 
 @router.post("/conversations/send")
 async def send_message(body: SendMessageBody):
@@ -296,3 +325,126 @@ async def send_message(body: SendMessageBody):
         logger.warning("Mensagem enviada mas não salva no CRM: %s", e)
 
     return {"status": "ok", "sent": True}
+
+
+@router.post("/conversations/send-media")
+async def send_media(body: SendMediaBody):
+    """Envia mídia (imagem, vídeo, áudio, doc, figurinha)."""
+    instance = _get_active_instance()
+    phone = body.chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+
+    extra_args = {}
+    if body.delay: extra_args["delay"] = body.delay
+    if body.reply_id: extra_args["replyid"] = body.reply_id
+
+    result = await uazapi.send_media(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        phone=phone,
+        media_type=body.media_type,
+        file=body.file,
+        text=body.text,
+        doc_name=body.doc_name,
+        instance_token=instance.get("instance_token"),
+        **extra_args
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=f"Erro ao enviar mídia: {result['error']}")
+
+    # Salva referência no CRM
+    try:
+        db = get_supabase()
+        client_res = db.table("clients").select("id").eq("phone", phone).limit(1).execute()
+        if client_res.data:
+            content = f"[{body.media_type.upper()}] {body.text or body.doc_name or ''}"
+            db.table("messages").insert({
+                "client_id": client_res.data[0]["id"],
+                "content": content.strip(),
+                "sender_type": "agent",
+                "channel": "whatsapp",
+                "is_from_client": False,
+            }).execute()
+    except Exception as e:
+        logger.warning("Mídia enviada mas não salva no CRM: %s", e)
+
+    return {"status": "ok", "result": result}
+
+
+@router.post("/conversations/send-location")
+async def send_location(body: SendLocationBody):
+    """Envia localização geográfica."""
+    instance = _get_active_instance()
+    phone = body.chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+
+    result = await uazapi.send_location(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        phone=phone,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        name=body.name,
+        address=body.address,
+        instance_token=instance.get("instance_token"),
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=f"Erro ao enviar localização: {result['error']}")
+
+    try:
+        db = get_supabase()
+        client_res = db.table("clients").select("id").eq("phone", phone).limit(1).execute()
+        if client_res.data:
+            content = f"📍 Localização: {body.name or 'Enviada'}"
+            db.table("messages").insert({
+                "client_id": client_res.data[0]["id"],
+                "content": content,
+                "sender_type": "agent",
+                "channel": "whatsapp",
+                "is_from_client": False,
+            }).execute()
+    except Exception as e:
+        logger.warning("Localização enviada mas não salva no CRM: %s", e)
+
+    return {"status": "ok", "result": result}
+
+
+# ─── Exclusão ─────────────────────────────────────────────────────────────────
+
+@router.post("/messages/delete")
+async def delete_message(body: DeleteMessageBody):
+    """Apaga uma mensagem para todos (unsend)."""
+    instance = _get_active_instance()
+    result = await uazapi.delete_message(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        message_id=body.message_id,
+        instance_token=instance.get("instance_token"),
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=f"Erro ao apagar mensagem: {result['error']}")
+
+    return {"status": "ok", "result": result}
+
+
+@router.post("/conversations/delete")
+async def delete_conversation(body: DeleteChatBody):
+    """Deleta uma conversa do WhatsApp e/ou Banco de Dados."""
+    instance = _get_active_instance()
+    phone = body.chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+
+    result = await uazapi.delete_chat(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        phone=phone,
+        delete_chat_db=body.delete_chat_db,
+        delete_messages_db=body.delete_messages_db,
+        delete_chat_whatsapp=body.delete_chat_whatsapp,
+        instance_token=instance.get("instance_token"),
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=f"Erro ao deletar conversa: {result['error']}")
+
+    return {"status": "ok", "result": result}

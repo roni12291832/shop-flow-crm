@@ -64,6 +64,152 @@ class UazapiClient:
             except Exception as e:
                 logger.error(f"Erro ao enviar para {phone}: {e}")
                 return {"error": str(e)}
+        return {"error": "Falha desconhecida no envio de texto"}
+
+    async def send_media(
+        self,
+        api_url: str,
+        api_token: str,
+        phone: str,
+        media_type: str,
+        file: str,
+        text: str | None = None,
+        doc_name: str | None = None,
+        instance_token: str | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Envia mídia (imagem, vídeo, áudio, documento, figurinha).
+        Endpoint: POST /send/media
+        """
+        url = f"{api_url.rstrip('/')}/send/media"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        
+        payload = {
+            "number": self._format_phone(phone),
+            "type": media_type,
+            "file": file,
+        }
+        if text:
+            payload["text"] = text
+        if doc_name:
+            payload["docName"] = doc_name
+            
+        # Adiciona argumentos extras (delay, mentions, etc)
+        payload.update(kwargs)
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao enviar mídia ({media_type}) para {phone}: {e}")
+                return {"error": str(e)}
+        return {"error": "Falha desconhecida no envio de mídia"}
+
+    async def send_location(
+        self,
+        api_url: str,
+        api_token: str,
+        phone: str,
+        latitude: float,
+        longitude: float,
+        name: str | None = None,
+        address: str | None = None,
+        instance_token: str | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Envia localização geográfica.
+        Endpoint: POST /send/location
+        """
+        url = f"{api_url.rstrip('/')}/send/location"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        
+        payload = {
+            "number": self._format_phone(phone),
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+        if name:
+            payload["name"] = name
+        if address:
+            payload["address"] = address
+            
+        payload.update(kwargs)
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao enviar localização para {phone}: {e}")
+                return {"error": str(e)}
+        return {"error": "Falha desconhecida no envio de localização"}
+
+    async def delete_message(
+        self,
+        api_url: str,
+        api_token: str,
+        message_id: str,
+        instance_token: str | None = None,
+    ) -> dict:
+        """
+        Apaga uma mensagem para todos.
+        Endpoint: POST /message/delete
+        """
+        url = f"{api_url.rstrip('/')}/message/delete"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        payload = {"id": message_id}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao apagar mensagem {message_id}: {e}")
+                return {"error": str(e)}
+        return {"error": "Falha desconhecida ao apagar mensagem"}
+
+    async def delete_chat(
+        self,
+        api_url: str,
+        api_token: str,
+        phone: str,
+        delete_chat_db: bool = True,
+        delete_messages_db: bool = True,
+        delete_chat_whatsapp: bool = True,
+        instance_token: str | None = None,
+    ) -> dict:
+        """
+        Deleta um chat e suas mensagens.
+        Endpoint: POST /chat/delete
+        """
+        url = f"{api_url.rstrip('/')}/chat/delete"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        payload = {
+            "number": self._format_phone(phone),
+            "deleteChatDB": delete_chat_db,
+            "deleteMessagesDB": delete_messages_db,
+            "deleteChatWhatsApp": delete_chat_whatsapp,
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao deletar chat {phone}: {e}")
+                return {"error": str(e)}
+        return {"error": "Falha desconhecida ao deletar chat"}
 
     async def send_bulk_campaign(
         self,
@@ -105,7 +251,8 @@ class UazapiClient:
             )
             if "error" in resp:
                 results["failed"] += 1
-                results["errors"].append({"phone": phone, "error": resp["error"]})
+                if isinstance(results.get("errors"), list):
+                    results["errors"].append({"phone": phone, "error": resp["error"]})
             else:
                 results["sent"] += 1
 

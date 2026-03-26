@@ -24,8 +24,8 @@ const STAGES = [
   { value: "desqualificado", label: "Desqualificado", color: "hsl(var(--muted-foreground))" },
 ];
 
-interface Opportunity { id: string; title: string; estimated_value: number; stage: string; client_name?: string; client_phone?: string; origin?: string; }
-interface Client { id: string; name: string; phone: string; origin: string; }
+interface Opportunity { id: string; title: string; estimated_value: number; stage: string; client_id?: string; client_name?: string; client_phone?: string; client_email?: string; client_city?: string; client_notes?: string; origin?: string; }
+interface Client { id: string; name: string; phone: string; email?: string; city?: string; notes?: string; origin: string; }
 
 export default function Pipeline() {
   const {  user } = useAuth();
@@ -36,7 +36,7 @@ export default function Pipeline() {
   const [lossDialogOpen, setLossDialogOpen] = useState(false);
   const [pendingLossId, setPendingLossId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ id: "", title: "", estimated_value: "" });
+  const [editForm, setEditForm] = useState({ id: "", title: "", estimated_value: "", client_id: "", client_name: "", client_phone: "", client_email: "", client_city: "", client_notes: "", origin: "" });
 
   // Bulk Message State
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -47,7 +47,7 @@ export default function Pipeline() {
   const fetchData = async () => {
         const [oppsRes, clientsRes] = await Promise.all([
       supabase.from("opportunities").select("*"),
-      supabase.from("clients").select("id, name, phone, origin"),
+      supabase.from("clients").select("id, name, phone, email, city, notes, origin"),
     ]);
     const clientMap: Record<string, Client> = {};
     (clientsRes.data || []).forEach((c: any) => { clientMap[c.id] = c; });
@@ -55,6 +55,9 @@ export default function Pipeline() {
       ...o,
       client_name: clientMap[o.client_id]?.name || "Cliente",
       client_phone: clientMap[o.client_id]?.phone || "",
+      client_email: clientMap[o.client_id]?.email || "",
+      client_city: clientMap[o.client_id]?.city || "",
+      client_notes: clientMap[o.client_id]?.notes || "",
       origin: clientMap[o.client_id]?.origin || "outro"
     })));
     setClients((clientsRes.data || []) as Client[]);
@@ -95,16 +98,44 @@ export default function Pipeline() {
   };
 
   const openEdit = (opp: Opportunity) => {
-    setEditForm({ id: opp.id, title: opp.title, estimated_value: String(opp.estimated_value) });
+    setEditForm({
+      id: opp.id,
+      title: opp.title,
+      estimated_value: String(opp.estimated_value),
+      client_id: opp.client_id || "",
+      client_name: opp.client_name || "",
+      client_phone: opp.client_phone || "",
+      client_email: opp.client_email || "",
+      client_city: opp.client_city || "",
+      client_notes: opp.client_notes || "",
+      origin: opp.origin || "outro",
+    });
     setEditDialogOpen(true);
   };
 
   const handleEdit = async () => {
-    const { error } = await supabase.from("opportunities").update({
+    const oppUpdate = supabase.from("opportunities").update({
       title: editForm.title, estimated_value: parseFloat(editForm.estimated_value) || 0,
     }).eq("id", editForm.id);
-    if (error) toast.error("Erro ao atualizar");
-    else { toast.success("Atualizado!"); setEditDialogOpen(false); fetchData(); }
+
+    const promises: Promise<any>[] = [oppUpdate];
+
+    if (editForm.client_id) {
+      const clientUpdate = supabase.from("clients").update({
+        name: editForm.client_name,
+        phone: editForm.client_phone,
+        email: editForm.client_email || null,
+        city: editForm.client_city || null,
+        notes: editForm.client_notes || null,
+        origin: editForm.origin,
+      }).eq("id", editForm.client_id);
+      promises.push(clientUpdate);
+    }
+
+    const results = await Promise.all(promises);
+    const hasError = results.some((r: any) => r.error);
+    if (hasError) toast.error("Erro ao atualizar");
+    else { toast.success("Lead atualizado!"); setEditDialogOpen(false); fetchData(); }
   };
 
   const openBulkMessage = (stage: { value: string; label: string }) => {
@@ -237,11 +268,38 @@ export default function Pipeline() {
       <LossReasonDialog open={lossDialogOpen} onOpenChange={setLossDialogOpen} onConfirm={confirmLoss} />
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Editar Oportunidade</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Editar Lead</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2"><Label>Título</Label><Input value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Valor (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Dados do Cliente</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5 col-span-2"><Label>Nome</Label><Input value={editForm.client_name} onChange={e => setEditForm({ ...editForm, client_name: e.target.value })} placeholder="Nome completo" /></div>
+              <div className="space-y-1.5"><Label>Telefone</Label><Input value={editForm.client_phone} onChange={e => setEditForm({ ...editForm, client_phone: e.target.value })} placeholder="5511999999999" /></div>
+              <div className="space-y-1.5"><Label>Email</Label><Input type="email" value={editForm.client_email} onChange={e => setEditForm({ ...editForm, client_email: e.target.value })} placeholder="email@exemplo.com" /></div>
+              <div className="space-y-1.5"><Label>Cidade</Label><Input value={editForm.client_city} onChange={e => setEditForm({ ...editForm, client_city: e.target.value })} placeholder="São Paulo" /></div>
+              <div className="space-y-1.5">
+                <Label>Origem</Label>
+                <Select value={editForm.origin} onValueChange={v => setEditForm({ ...editForm, origin: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                    <SelectItem value="loja_fisica">Loja Física</SelectItem>
+                    <SelectItem value="instagram">Instagram</SelectItem>
+                    <SelectItem value="indicacao">Indicação</SelectItem>
+                    <SelectItem value="site">Site</SelectItem>
+                    <SelectItem value="outro">Outro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5 col-span-2"><Label>Observações</Label>
+                <textarea className="w-full min-h-[80px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" value={editForm.client_notes} onChange={e => setEditForm({ ...editForm, client_notes: e.target.value })} placeholder="Anotações sobre o cliente..." />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider pt-2 border-t border-border">Oportunidade</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5 col-span-2"><Label>Título</Label><Input value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></div>
+              <div className="space-y-1.5 col-span-2"><Label>Valor estimado (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
+            </div>
             <Button onClick={handleEdit} className="w-full">Salvar</Button>
           </div>
         </DialogContent>

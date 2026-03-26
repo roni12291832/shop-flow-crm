@@ -85,17 +85,54 @@ async def receive_whatsapp_message(request: Request):
     event = (body.get("event", "") or "").upper()
     message_data = body.get("data", body)
 
-    # UAZAPI GO envia event: "messages" para mensagens recebidas
-    # Ignorar eventos de connection/status — não são mensagens
-    if "MESSAGE" not in event:
+    # UAZAPI GO envia eventos variados. 
+    # Precisamos de MESSAGE (recebimento), CHATS_DELETE (sync apagados) e MESSAGES_DELETE (sync apagados)
+    is_message = "MESSAGE" in event
+    is_delete = "DELETE" in event
+    
+    if not (is_message or is_delete):
         if event:
-            logger.info(f"Webhook ignorado: evento '{event}' não é mensagem")
-        return {"status": "ignored", "reason": f"evento {event} não é mensagem"}
+            logger.info(f"Webhook ignorado: evento '{event}' não processado")
+        return {"status": "ignored", "reason": f"evento {event} não processado"}
 
     if not isinstance(message_data, dict):
         return {"status": "ignored", "reason": "formato de dados não reconhecido"}
 
-    # Extrai dados da mensagem no formato UAZAPI GO
+    # ─── Tratamento de Exclusão (Sync) ──────────────────────────────
+    if is_delete:
+        try:
+            db = get_supabase()
+            if "CHAT" in event:
+                # Exclusão de conversa
+                remote_jid = message_data.get("number") or message_data.get("remoteJid") or ""
+                phone = remote_jid.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+                if phone:
+                    # Busca cliente para apagar conversas vinculadas
+                    client_res = db.table("clients").select("id").eq("phone", phone).limit(1).execute()
+                    if client_res.data:
+                        client_id = client_res.data[0]["id"]
+                        # Apaga mensagens e conversas
+                        db.table("messages").delete().eq("client_id", client_id).execute()
+                        db.table("conversations").delete().eq("client_id", client_id).execute()
+                        logger.info(f"Sync: Conversa e mensagens de {phone} apagadas via webhook")
+                        return {"status": "deleted", "type": "chat", "phone": phone}
+            
+            elif "MESSAGE" in event:
+                # Exclusão de mensagem única
+                msg_id = message_data.get("id") or message_data.get("messageid")
+                if msg_id:
+                    db.table("messages").delete().eq("id", msg_id).execute()
+                    # Fallback para IDs do CRM
+                    db.table("messages").delete().eq("id", f"crm-{msg_id}").execute()
+                    logger.info(f"Sync: Mensagem {msg_id} apagada via webhook")
+                    return {"status": "deleted", "type": "message", "id": msg_id}
+            
+            return {"status": "ignored", "reason": "evento de delete sem dados suficientes"}
+        except Exception as e:
+            logger.error(f"Erro ao processar sync de delete: {e}")
+            return {"status": "error", "message": str(e)}
+
+    # ─── Tratamento de Mensagens Recebidas ────────────────────────────
     key = message_data.get("key", {})
     remote_jid = key.get("remoteJid", "") or message_data.get("from", "") or ""
     from_me = key.get("fromMe", False) or message_data.get("fromMe", False)
@@ -103,16 +140,21 @@ async def receive_whatsapp_message(request: Request):
     msg_obj = message_data.get("message", {}) or {}
     if isinstance(msg_obj, str):
         message_text = msg_obj
-    else:
+    elif isinstance(msg_obj, dict):
         message_text = (
             msg_obj.get("conversation", "")
-            or msg_obj.get("extendedTextMessage", {}).get("text", "")
-            or msg_obj.get("imageMessage", {}).get("caption", "")
-            or msg_obj.get("videoMessage", {}).get("caption", "")
+            or (msg_obj.get("extendedTextMessage") or {}).get("text", "")
+            if isinstance(msg_obj.get("extendedTextMessage"), dict) else ""
+            or (msg_obj.get("imageMessage") or {}).get("caption", "")
+            if isinstance(msg_obj.get("imageMessage"), dict) else ""
+            or (msg_obj.get("videoMessage") or {}).get("caption", "")
+            if isinstance(msg_obj.get("videoMessage"), dict) else ""
             or message_data.get("body", "")
             or message_data.get("text", "")
             or ""
         )
+    else:
+        message_text = ""
 
     push_name = (
         message_data.get("pushName", "")
