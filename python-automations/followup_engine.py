@@ -246,7 +246,42 @@ async def _auto_move_expired(db) -> int:
             if pending_res.data:
                 continue  # ainda tem pendentes, não mover
 
-            # Sem pendentes e está no mesmo stage → move
+            # Busca quando o último step foi enviado para esta opp
+            last_sent_res = (
+                db.table("stage_followup_schedules")
+                .select("sent_at")
+                .eq("opportunity_id", opp_id)
+                .eq("step_id", step["id"])
+                .eq("status", "sent")
+                .order("sent_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not last_sent_res.data or not last_sent_res.data[0].get("sent_at"):
+                continue
+
+            last_sent_at = last_sent_res.data[0]["sent_at"]
+            client_id = opp_res.data[0]["client_id"]
+
+            # Verifica se o cliente enviou QUALQUER mensagem APÓS o envio do último step.
+            # Se sim, ele respondeu — não deve ser movido para "perdido".
+            client_response_res = (
+                db.table("messages")
+                .select("id")
+                .eq("client_id", client_id)
+                .eq("is_from_client", True)
+                .gte("created_at", last_sent_at)
+                .limit(1)
+                .execute()
+            )
+            if client_response_res.data:
+                logger.info(
+                    "Opp %s: cliente respondeu após step final — não movendo para '%s'",
+                    opp_id, step["auto_move_to"],
+                )
+                continue  # cliente respondeu, não mover
+
+            # Sem pendentes, sem resposta após o último step → move
             if not DRY_RUN:
                 db.table("opportunities").update({
                     "stage": step["auto_move_to"],
