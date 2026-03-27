@@ -22,7 +22,7 @@ from supabase_client import get_supabase
 from uazapi_client import uazapi
 from jarvis_agent import jarvis
 from config import get_settings
-from followup_engine import cancel_pending_for_client
+from followup_engine import cancel_pending_for_client, on_stage_change
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 
@@ -142,18 +142,20 @@ async def receive_whatsapp_message(request: Request):
     if isinstance(msg_obj, str):
         message_text = msg_obj
     elif isinstance(msg_obj, dict):
-        message_text = (
-            msg_obj.get("conversation", "")
-            or (msg_obj.get("extendedTextMessage") or {}).get("text", "")
-            if isinstance(msg_obj.get("extendedTextMessage"), dict) else ""
-            or (msg_obj.get("imageMessage") or {}).get("caption", "")
-            if isinstance(msg_obj.get("imageMessage"), dict) else ""
-            or (msg_obj.get("videoMessage") or {}).get("caption", "")
-            if isinstance(msg_obj.get("videoMessage"), dict) else ""
-            or message_data.get("body", "")
-            or message_data.get("text", "")
-            or ""
-        )
+        # Extrai texto em cascata — cada tipo de mensagem tem seu campo específico.
+        # Usando blocos if/elif explícitos para evitar bug de precedência do operador
+        # `or` vs ternário `if/else` que mascarava fallbacks quando o campo existia mas estava vazio.
+        message_text = msg_obj.get("conversation") or ""
+        if not message_text and isinstance(msg_obj.get("extendedTextMessage"), dict):
+            message_text = msg_obj["extendedTextMessage"].get("text", "")
+        if not message_text and isinstance(msg_obj.get("imageMessage"), dict):
+            message_text = msg_obj["imageMessage"].get("caption", "")
+        if not message_text and isinstance(msg_obj.get("videoMessage"), dict):
+            message_text = msg_obj["videoMessage"].get("caption", "")
+        if not message_text and isinstance(msg_obj.get("documentMessage"), dict):
+            message_text = msg_obj["documentMessage"].get("caption", "")
+        if not message_text:
+            message_text = message_data.get("body") or message_data.get("text") or ""
     else:
         message_text = ""
 
@@ -298,13 +300,25 @@ async def receive_whatsapp_message(request: Request):
 
                 elif existing_opp["stage"] in ("lead_novo", "contato_iniciado"):
                     # Oportunidade ativa em etapa inicial → tenta avançar via IA
-                    opportunity_action = f"existing_{existing_opp['stage']}"
+                    old_stage = existing_opp["stage"]
+                    opportunity_action = f"existing_{old_stage}"
                     try:
                         is_interested = await jarvis.analyze_client_intent(message_text)
                         if is_interested:
                             db.table("opportunities").update({"stage": "interessado"}).eq("id", existing_opp["id"]).execute()
                             opportunity_action = "advanced_to_interessado"
                             logger.info("Oportunidade de %s avançada para 'interessado' via IA", push_name)
+                            # Aciona follow-up para a nova etapa — essencial para agendar
+                            # as mensagens automáticas de 'interessado' na fila de follow-up.
+                            try:
+                                await on_stage_change(
+                                    client_id=str(client_id),
+                                    opportunity_id=str(existing_opp["id"]),
+                                    new_stage="interessado",
+                                    old_stage=old_stage,
+                                )
+                            except Exception as fe:
+                                logger.warning("Erro ao acionar follow-up de 'interessado' (não crítico): %s", fe)
                     except Exception as e:
                         logger.warning("Erro ao analisar intenção via IA (não crítico): %s", e)
 

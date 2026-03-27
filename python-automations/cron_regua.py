@@ -94,14 +94,16 @@ async def process_rule(rule: dict, wp_config: dict) -> None:
     random.shuffle(eligible_clients)
 
     for i, client in enumerate(eligible_clients):
-        # Verifica se já recebeu hoje
+        # Verifica se já recebeu hoje — usa `scheduled_for` (coluna garantida no schema).
+        # A coluna `created_at` NÃO é inserida explicitamente nesta tabela, por isso
+        # usamos `scheduled_for` que é sempre preenchida ao registrar a execução.
         try:
             exec_check = (
                 db.table("relationship_executions")
                 .select("id")
                 .eq("rule_id", rule["id"])
                 .eq("customer_id", client["id"])
-                .gte("created_at", str(today))
+                .gte("scheduled_for", str(today))
                 .execute()
             )
             if exec_check.data:
@@ -114,12 +116,13 @@ async def process_rule(rule: dict, wp_config: dict) -> None:
         if not phone:
             continue
 
-        msg_template = random.choice(messages_list)
+        variation_idx = random.randrange(len(messages_list))
+        msg_template = messages_list[variation_idx]
         personalized_msg = uazapi._personalize_message(msg_template, client)
 
         logger.info(
             "Preparando envio para %s (variação %d/%d)",
-            client["name"], messages_list.index(msg_template) + 1, len(messages_list),
+            client["name"], variation_idx + 1, len(messages_list),
         )
 
         status = "sucesso"

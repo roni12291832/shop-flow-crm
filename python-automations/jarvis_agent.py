@@ -4,7 +4,7 @@ Jarvis — Agente de IA para análise de dados e respostas inteligentes.
 Usa OpenAI GPT-4o-mini como motor de inteligência.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from openai import AsyncOpenAI
 from config import get_settings
 from supabase_client import get_supabase
@@ -166,21 +166,39 @@ Gere uma resposta adequada:
         return response.choices[0].message.content
 
     async def analyze_client_intent(self, client_message: str) -> bool:
-        """Avalia se a mensagem do cliente demonstra interesse em algum produto."""
+        """Avalia se a mensagem do cliente demonstra interesse em algum produto.
+
+        Retorna False em caso de erro ou resposta inesperada da OpenAI,
+        evitando quebrar o processamento do webhook.
+        """
+        if not client_message or not client_message.strip():
+            return False
+
         messages = [
-            {"role": "system", "content": """Você é um classificador de intenção. 
+            {"role": "system", "content": """Você é um classificador de intenção.
 Avalie se a mensagem do cliente expressa interesse em comprar, quer saber preço, pergunta sobre um produto específico, ou demonstra intenção de compra de qualquer forma.
 Responda APENAS "SIM" se for interesse, ou "NAO" caso contrário (por exemplo: um simples 'oi', erro, mensagem vazia, ou assunto não relacionado)."""},
             {"role": "user", "content": f"Mensagem do cliente: {client_message}"}
         ]
 
-        response = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.0,
-            max_tokens=10,
-        )
-        return "SIM" in response.choices[0].message.content.strip().upper()
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.0,
+                max_tokens=10,
+            )
+            if not response.choices:
+                logger.warning("analyze_client_intent: OpenAI retornou choices vazio")
+                return False
+            content = response.choices[0].message.content
+            if content is None:
+                logger.warning("analyze_client_intent: OpenAI retornou content None")
+                return False
+            return "SIM" in content.strip().upper()
+        except Exception as e:
+            logger.warning("analyze_client_intent falhou — assumindo sem interesse: %s", e)
+            return False
 
     async def generate_message_variations(self, base_message: str, count: int = 15) -> str:
         """Gera variações de uma mensagem para evitar bloqueio no WhatsApp."""
@@ -209,8 +227,8 @@ REGRAS CRÍTICAS:
 
     async def _collect_daily_context(self) -> str:
         """Coleta dados do dia para o relatório diário."""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Vendas do dia
         sales_res = self.db.table("sales_entries").select("*").gte("created_at", f"{today}T00:00:00").execute()
