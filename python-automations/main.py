@@ -9,7 +9,7 @@ Para rodar:
 """
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -166,6 +166,18 @@ app.include_router(campaigns_router)
 app.include_router(whatsapp_router)
 if _FOLLOWUP_ENABLED and followup_router:
     app.include_router(followup_router)
+else:
+    # Caso falhe a importação, cria rotas fantasmas para reportar o erro no frontend
+    @app.get("/followup/config")
+    @app.get("/followup/metrics")
+    async def followup_error_report():
+        raise HTTPException(
+            status_code=503, 
+            detail={
+                "error": "Sistema de Follow-Up desativado por erro de inicialização",
+                "traceback": _IMPORT_ERROR
+            }
+        )
 
 
 @app.get("/")
