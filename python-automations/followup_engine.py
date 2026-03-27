@@ -23,7 +23,8 @@ from uazapi_client import uazapi
 BRT = timezone(timedelta(hours=-3))
 WINDOW_START = 8   # 08h BRT
 WINDOW_END   = 18  # 18h BRT
-DAILY_LIMIT_PER_STAGE = 25
+DAILY_LIMIT_PER_STEP = 25          # 25 por step por dia (contato_iniciado e interessado)
+STAGES_UNLIMITED    = {"comprador"} # Comprador: sem limite diário
 
 
 def _is_within_window() -> bool:
@@ -31,12 +32,13 @@ def _is_within_window() -> bool:
     return WINDOW_START <= h < WINDOW_END
 
 
-def _sent_today_for_stage(db, stage: str) -> int:
+def _sent_today_for_step(db, step_id: str) -> int:
+    """Conta quantos follow-ups já foram enviados hoje para um step específico."""
     today = datetime.now(BRT).date().isoformat()
     res = (
         db.table("stage_followup_logs")
         .select("id", count="exact")
-        .eq("stage", stage)
+        .eq("step_id", step_id)
         .eq("status", "sent")
         .gte("sent_at", f"{today}T00:00:00-03:00")
         .execute()
@@ -371,10 +373,36 @@ async def job_process_followups() -> None:
         gmb_link = _get_gmb_link(db)
 
         for stage in ("contato_iniciado", "interessado", "comprador"):
-            sent_today = _sent_today_for_stage(db, stage)
-            remaining = DAILY_LIMIT_PER_STAGE - sent_today
-            if remaining <= 0:
-                logger.info("Follow-up '%s': limite diário atingido (%d/25)", stage, sent_today)
+            unlimited = stage in STAGES_UNLIMITED
+
+            # Busca steps ativos desta etapa para aplicar limite por step
+            steps_res = (
+                db.table("stage_followup_steps")
+                .select("id, step_number")
+                .eq("stage", stage)
+                .order("step_number")
+                .execute()
+            )
+            step_ids = [s["id"] for s in (steps_res.data or [])]
+
+            if not step_ids:
+                continue
+
+            # Calcula o limite total disponível somando o restante de cada step
+            # Comprador: ilimitado → usa 9999 como teto para não bloquear nada
+            if unlimited:
+                total_remaining = 9999
+            else:
+                total_remaining = sum(
+                    max(0, DAILY_LIMIT_PER_STEP - _sent_today_for_step(db, sid))
+                    for sid in step_ids
+                )
+
+            if total_remaining <= 0:
+                logger.info(
+                    "Follow-up '%s': limite diário atingido (%d/step × %d steps)",
+                    stage, DAILY_LIMIT_PER_STEP, len(step_ids),
+                )
                 continue
 
             pending_res = (
@@ -384,16 +412,35 @@ async def job_process_followups() -> None:
                 .eq("status", "pending")
                 .lte("scheduled_for", now_utc)
                 .order("scheduled_for")
-                .limit(remaining)
+                .limit(total_remaining)
                 .execute()
             )
             pending = pending_res.data or []
             if not pending:
                 continue
 
-            logger.info("Follow-up '%s': %d agendamentos para processar", stage, len(pending))
+            # Controla limite individual por step durante o processamento
+            step_sent_counts: dict[str, int] = {
+                sid: _sent_today_for_step(db, sid) for sid in step_ids
+            }
+
+            logger.info(
+                "Follow-up '%s': %d agendamentos para processar (%s)",
+                stage, len(pending), "ilimitado" if unlimited else f"{DAILY_LIMIT_PER_STEP}/step",
+            )
 
             for i, sched in enumerate(pending):
+                # Verifica limite por step (exceto comprador que é ilimitado)
+                step_id = sched["step_id"]
+                if not unlimited:
+                    already_sent = step_sent_counts.get(step_id, 0)
+                    if already_sent >= DAILY_LIMIT_PER_STEP:
+                        logger.info(
+                            "Follow-up step %d '%s': limite de %d/dia atingido — pulando",
+                            sched["step_number"], stage, DAILY_LIMIT_PER_STEP,
+                        )
+                        continue
+
                 client_res = (
                     db.table("clients").select("id, name, phone").eq("id", sched["client_id"]).limit(1).execute()
                 )
@@ -456,6 +503,10 @@ async def job_process_followups() -> None:
                     "sent_at": sent_at if status == "sent" else None,
                     "cancel_reason": error if status == "failed" else None,
                 }).eq("id", sched["id"]).execute()
+
+                # Atualiza contador local por step para respeitar limite durante este job
+                if status == "sent" and not unlimited:
+                    step_sent_counts[step_id] = step_sent_counts.get(step_id, 0) + 1
 
                 try:
                     db.table("stage_followup_logs").insert({
