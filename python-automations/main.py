@@ -23,13 +23,16 @@ from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
 from jarvis_agent import jarvis
+_IMPORT_ERROR = None
 try:
     from followup_engine import job_process_followups
     from followup_router import router as followup_router
     _FOLLOWUP_ENABLED = True
 except Exception as _fe:
     import logging as _logging
+    import traceback
     _logging.getLogger("shopflow").error("FALHA ao importar followup: %s", _fe)
+    _IMPORT_ERROR = traceback.format_exc()
     followup_router = None  # type: ignore
     job_process_followups = None  # type: ignore
     _FOLLOWUP_ENABLED = False
@@ -175,7 +178,9 @@ async def root():
     return {
         "service": "Shop Flow CRM Automações",
         "status": "online",
-        "version": "1.0.0",
+        "version": "1.1.2",
+        "followup_enabled": _FOLLOWUP_ENABLED,
+        "import_error": _IMPORT_ERROR if _IMPORT_ERROR else None,
         "scheduled_jobs": jobs,
     }
 
