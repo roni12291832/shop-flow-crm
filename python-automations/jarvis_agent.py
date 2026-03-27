@@ -208,7 +208,7 @@ Seu objetivo é gerar exatamente {count} variações extremamente diversificadas
 
 REGRAS CRÍTICAS:
 1. Mantenha o mesmo sentido, mas alterne saudações (Olá, Oi, Tudo bem?, Como vai?), sinônimos, ordem das frases e emojis.
-2. Use as mesmas variáveis que encontrar na base (ex: {{{{nome}}}}, {{{{produto}}}}). NÃO as invente ou mude.
+2. Use as mesmas variáveis que encontrar na base (ex: {{nome}}, {{produto}}). NÃO as invente ou mude.
 3. Separe cada variação APENAS pela sequência " ||| " (três barras verticais com espaços).
 4. O resultado deve ser UM ÚNICO TEXTO longo contendo as {count} versões separadas por |||.
 5. Não numere as versões no texto."""},
