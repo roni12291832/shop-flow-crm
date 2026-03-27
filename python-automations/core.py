@@ -82,61 +82,55 @@ _LOGGING_INITIALIZED = False
 
 
 def setup_logging() -> logging.Logger:
-    """
-    Configura o logger raiz com dois handlers:
-      - Arquivo: logs/shopflow.log (rotação diária à meia-noite, mantém 30 dias)
-      - Terminal: nível INFO, mesmo formato
-
-    Idempotente — pode ser chamado múltiplas vezes sem duplicar handlers.
-    Retorna o logger 'shopflow'.
-    """
     global _LOGGING_INITIALIZED
     if _LOGGING_INITIALIZED:
         return logging.getLogger("shopflow")
     _LOGGING_INITIALIZED = True
 
-    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    shopflow_logger = logging.getLogger("shopflow")
+    shopflow_logger.setLevel(logging.DEBUG)
 
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-
-    # Remove basicConfig padrão se existir (evita duplicatas com main.py)
-    root.handlers = [
-        h for h in root.handlers
-        if not isinstance(h, (logging.StreamHandler,))
-        or isinstance(h, TimedRotatingFileHandler)
-    ]
-
-    # Handler de arquivo com rotação diária
-    file_handler = TimedRotatingFileHandler(
-        _LOG_FILE,
-        when="midnight",
-        interval=1,
-        backupCount=30,
-        encoding="utf-8",
+    # Handler de terminal (sempre funciona)
+    _LOG_FMT = logging.Formatter(
+        "%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(_LOG_FMT)
-
-    # Handler de terminal
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(_LOG_FMT)
-
-    root.addHandler(file_handler)
+    
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
     root.addHandler(console_handler)
 
-    shopflow_logger = logging.getLogger("shopflow")
-    shopflow_logger.info(
-        "Logging inicializado | arquivo=%s | DRY_RUN=%s",
-        _LOG_FILE,
-        DRY_RUN,
-    )
+    # Tenta criar handler de arquivo
+    try:
+        log_dir = Path("logs")
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # Fallback para /tmp se falhar no diretório local
+            log_dir = Path("/tmp/shopflow_logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            
+        log_file = log_dir / "shopflow.log"
+        file_handler = TimedRotatingFileHandler(
+            log_file,
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(_LOG_FMT)
+        root.addHandler(file_handler)
+        shopflow_logger.info("Logging inicializado em arquivo: %s", log_file)
+    except Exception as e:
+        shopflow_logger.warning("Falha ao inicializar logging em arquivo (usando apenas console): %s", e)
+
+    shopflow_logger.info("Logging (console) inicializado | DRY_RUN=%s", DRY_RUN)
     return shopflow_logger
 
-
-# Inicializa automaticamente ao importar core.
-# Todos os getLogger() do projeto herdam os handlers configurados aqui.
 logger = setup_logging()
 
 
