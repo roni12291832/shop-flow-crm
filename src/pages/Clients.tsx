@@ -46,14 +46,37 @@ export default function Clients() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchClients = async () => {
-    console.log("Fetching clients...");
-    const { data, error } = await supabase.from("clients").select("*").order("created_at", { ascending: false });
-    
+    // Busca todas as oportunidades para saber quem é lead e quem é comprador.
+    // Regra de negócio: uma pessoa só vira "cliente" quando chega em "comprador".
+    // Leads (qualquer outra etapa) aparecem apenas no Pipeline, não aqui.
+    const { data: opps } = await supabase
+      .from("opportunities")
+      .select("client_id, stage");
+
+    // Mapeia client_id → set de stages que este contato já teve
+    const clientStages: Record<string, Set<string>> = {};
+    (opps || []).forEach((o: any) => {
+      if (!clientStages[o.client_id]) clientStages[o.client_id] = new Set();
+      clientStages[o.client_id].add(o.stage);
+    });
+
+    const { data, error } = await supabase
+      .from("clients")
+      .select("*")
+      .order("created_at", { ascending: false });
+
     if (error) {
       console.error("Error fetching clients:", error);
-    } else {
-      console.log("Clients fetched successfully:", data?.length, "records found");
-      if (data) setClients(data as Client[]);
+    } else if (data) {
+      // Mostra apenas:
+      // 1. Compradores — tem ao menos uma oportunidade em "comprador"
+      // 2. Clientes diretos — não têm nenhuma oportunidade (foram cadastrados manualmente como cliente)
+      const clientesReais = (data as Client[]).filter((c) => {
+        const stages = clientStages[c.id];
+        if (!stages) return true;          // Sem pipeline → cliente direto → mostra
+        return stages.has("comprador");    // Tem comprador → mostra
+      });
+      setClients(clientesReais);
     }
   };
 
