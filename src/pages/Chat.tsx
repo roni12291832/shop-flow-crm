@@ -1130,7 +1130,7 @@ export default function Chat() {
         {!loadingChats && filteredChats.map(chat => {
           const isActive = chat.id === activeChatId;
           return (
-            <div key={chat.id} onClick={() => { setActiveChatId(chat.id); if (isMobile) setShowMobileChat(true); }}
+            <div key={chat.id} onClick={() => { setActiveChatId(chat.id); }}
               className={`flex items-center gap-3 px-3 py-3 cursor-pointer border-b border-border/30 transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted/40"}`}>
               {/* Avatar with gradient fallback */}
               <div
@@ -1290,11 +1290,10 @@ export default function Chat() {
         {/* Header */}
         <div className="px-4 py-2.5 border-b border-border bg-card flex justify-between items-center shrink-0">
           <div className="flex items-center gap-3">
-            {isMobile && (
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowMobileChat(false)}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            )}
+            {/* Botão voltar — só aparece em mobile (md:hidden) via CSS, sem depender de estado JS */}
+            <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={() => setActiveChatId(null)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
             <div
               className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center shrink-0"
               style={{ background: activeChat?.avatar_url ? undefined : nameToGradient(activeChat?.name || "?") }}
@@ -1532,6 +1531,11 @@ export default function Chat() {
   };
 
   // ─── Main layout ─────────────────────────────────────────────────────────────
+  // Layout usa CSS puro (sem depender do hook isMobile em JS) para evitar
+  // flickering quando componente re-renderiza ao trocar de conversa.
+  // Mobile: sidebar ocupa tela toda quando nenhuma conversa está aberta,
+  //         mensagens ocupam tela toda quando conversa está aberta.
+  // Desktop (≥768px): sidebar + mensagens sempre visíveis lado a lado.
   return (
     <div className="flex h-[calc(100vh-60px)] overflow-hidden animate-fade-in relative">
       {/* Lightbox */}
@@ -1539,20 +1543,27 @@ export default function Chat() {
         <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
 
-      {/* Sidebar */}
-      {(!isMobile || !showMobileChat) && (
-        <div className={`${isMobile ? "w-full" : "w-[300px]"} border-r border-border flex flex-col shrink-0`}>
-          {renderSidebar()}
-        </div>
-      )}
+      {/* Sidebar — sempre visível em desktop; no mobile oculta quando chat aberto */}
+      <div className={`
+        border-r border-border flex flex-col shrink-0
+        ${activeChatId
+          ? "hidden md:flex md:w-[300px]"   // mobile: esconde quando chat aberto
+          : "flex w-full md:w-[300px]"      // mobile: mostra quando nenhum chat
+        }
+      `}>
+        {renderSidebar()}
+      </div>
 
-      {/* Messages */}
-      {(!isMobile || showMobileChat) && (
-        <div className="flex-1 flex min-w-0 relative">
-          {renderMessages()}
-          {!isMobile && renderContactPanel()}
+      {/* Mensagens — sempre visível em desktop; no mobile oculta quando sem chat */}
+      <div className={`
+        flex-1 flex min-w-0 relative
+        ${activeChatId ? "flex" : "hidden md:flex"}
+      `}>
+        {renderMessages()}
+        <div className="hidden lg:block">
+          {renderContactPanel()}
         </div>
-      )}
+      </div>
     </div>
   );
 }
