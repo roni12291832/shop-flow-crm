@@ -61,6 +61,9 @@ interface WaMessage {
   media_url?: string; mimetype?: string;
   raw_message_id?: string; // ID original do UAZAPI para download de mídia
   chat_id?: string;        // JID do chat para download de mídia
+  base64_data?: string;    // base64 do arquivo (áudio já vem em sendPayload.file)
+  waveform?: string;       // waveform real do WhatsApp (base64)
+  duration?: number;       // duração em segundos
 }
 interface Client {
   id: string; name: string; phone: string | null;
@@ -138,20 +141,30 @@ function normalizeMessage(raw: any): WaMessage {
       msg.stickerMessage ? "stickerMessage" :
       msg.locationMessage ? "locationMessage" : "text");
 
-  // UAZAPI retorna URLs criptografadas do CDN do WhatsApp — não reproduzíveis diretamente.
-  // Guardamos o que tiver disponível mas usamos download-media para obter URL real.
+  // UAZAPI retorna a mídia em campos não-convencionais:
+  // - content.URL: URL CDN do WhatsApp (.enc = criptografada, não reproduzível)
+  // - content.mimetype: tipo MIME real
+  // - sendPayload.file: base64 do arquivo real (já decodificado!) — disponível para áudio/PTT
+  // - Para imagens: sendPayload.file pode estar vazio → precisa chamar /message/download
+  const content = (typeof raw.content === "object" && raw.content !== null) ? raw.content : {};
+  const sendPayload = (typeof raw.sendPayload === "object" && raw.sendPayload !== null) ? raw.sendPayload : {};
+
+  const base64File = sendPayload.file || "";
+  const contentUrl = content.URL || content.url || "";
+  // Usa content.URL como media_url apenas para imagens (URLs de imagem costumam ser acessíveis)
   const rawMediaUrl =
-    raw.mediaUrl || raw.media?.url ||
+    raw.mediaUrl || raw.fileURL ||
     msg.imageMessage?.url || msg.videoMessage?.url ||
     msg.audioMessage?.url || msg.pttMessage?.url ||
-    msg.documentMessage?.url || msg.stickerMessage?.url || undefined;
+    msg.documentMessage?.url || msg.stickerMessage?.url ||
+    contentUrl || undefined;
 
   const rawId = raw.messageid || raw.id || key.id || "";
 
   return {
     id: rawId || Math.random().toString(36).slice(2),
     raw_message_id: rawId || undefined,
-    chat_id: key.remoteJid || raw.chatid || undefined,
+    chat_id: raw.chatid || key.remoteJid || undefined,
     from_me: raw.fromMe ?? key.fromMe ?? false,
     text,
     timestamp: raw.messageTimestamp || raw.t || raw.timestamp,
@@ -159,10 +172,13 @@ function normalizeMessage(raw: any): WaMessage {
     source: "whatsapp",
     media_url: rawMediaUrl,
     mimetype:
-      raw.mimetype || raw.media?.mimetype ||
+      content.mimetype || raw.mimetype ||
       msg.imageMessage?.mimetype || msg.videoMessage?.mimetype ||
       msg.audioMessage?.mimetype || msg.pttMessage?.mimetype ||
       msg.documentMessage?.mimetype || undefined,
+    base64_data: base64File || undefined,
+    waveform: content.waveform || undefined,
+    duration: content.seconds || undefined,
   };
 }
 
@@ -246,25 +262,20 @@ function AudioPlayer({ src, token, fromMe, contactName }: {
   const progressRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let objectUrl: string | null = null;
-    fetch(src, { headers: { token } })
-      .then(r => {
-        if (!r.ok) throw new Error("fetch failed");
-        return r.blob();
-      })
-      .then(blob => {
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
-      })
-      .catch(() => {
-        setLoadError(true);
-      });
-    return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src, token]);
+    // A URL já vem resolvida pelo MediaResolver (blob URL ou URL pública).
+    // Se for blob URL (começa com blob:) ou data URL — usa direto.
+    // Se for URL pública (http/https sem .enc) — tenta carregar diretamente.
+    // Não precisa de fetch com token pois o MediaResolver já resolveu.
+    if (!src) return;
+    if (src.startsWith("blob:") || src.startsWith("data:")) {
+      setBlobUrl(src);
+      return;
+    }
+    // Para URLs públicas do UAZAPI storage, tenta carregar diretamente
+    setBlobUrl(src);
+  }, [src]);
 
-  const audioSrc = loadError ? src : (blobUrl || undefined);
+  const audioSrc = blobUrl || src || undefined;
 
   const togglePlay = () => {
     const a = audioRef.current;
@@ -430,9 +441,22 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
   );
 }
 
-// ========== MediaResolver — busca URL real de mídia via UAZAPI ==========
-// UAZAPI retorna URLs criptografadas do WhatsApp CDN que não são reproduzíveis.
-// Este componente chama /message/download-media para obter a URL acessível.
+// ========== MediaResolver — obtém URL reproduzível para mídia UAZAPI ==========
+// UAZAPI retorna mídias de 3 formas:
+//   1. sendPayload.file = base64 do arquivo real → áudio/PTT já vêm assim (WebM/Opus)
+//   2. content.URL = URL criptografada do CDN do WhatsApp → NÃO reproduzível
+//   3. fileURL = URL pública (após chamar /message/download com return_link: true)
+// Para áudio: usa base64 direto (sem precisar de API call)
+// Para imagem/vídeo: chama POST /message/download com return_link: true
+function base64ToUrl(b64: string, mime: string): string {
+  // Cria blob URL a partir de base64 para evitar limite de tamanho de data URLs
+  const byteChars = atob(b64);
+  const byteArr = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArr], { type: mime });
+  return URL.createObjectURL(blob);
+}
+
 function MediaResolver({
   msg, apiUrl, token, children
 }: {
@@ -441,54 +465,86 @@ function MediaResolver({
   token: string;
   children: (resolvedUrl: string | null, loading: boolean) => React.ReactNode;
 }) {
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(msg.media_url || null);
-  const [loading, setLoading] = useState(!msg.media_url && !!msg.raw_message_id);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Se já tem URL razoável, tenta usar ela diretamente.
-    // URLs do UAZAPI próprio (nexaflow.uazapi.com ou similar) já são acessíveis.
-    // URLs do CDN do WhatsApp (mmg.whatsapp.net, media-xxx.cdn.whatsapp.net) precisam download.
-    const needsDownload = !msg.media_url
-      || msg.media_url.includes("mmg.whatsapp.net")
-      || msg.media_url.includes("cdn.whatsapp.net")
-      || msg.media_url.includes("fna.whatsapp.net");
+    let blobUrl: string | null = null;
 
-    if (!needsDownload) { setLoading(false); return; }
-    if (!msg.raw_message_id) { setLoading(false); return; }
+    const resolve = async () => {
+      // ── Caso 1: base64 já disponível (áudio/PTT do UAZAPI) ──────────────────
+      if (msg.base64_data) {
+        const mime = msg.mimetype || "audio/webm;codecs=opus";
+        // WebM com mimetype "audio/ogg" — usa audio/webm para browser
+        const playMime = mime.includes("ogg") ? "audio/webm;codecs=opus" : mime;
+        blobUrl = base64ToUrl(msg.base64_data, playMime);
+        setResolvedUrl(blobUrl);
+        setLoading(false);
+        return;
+      }
 
-    setLoading(true);
-    const base = apiUrl.replace(/\/$/, "");
-    fetch(`${base}/message/download-media`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", token },
-      body: JSON.stringify({
-        messageid: msg.raw_message_id,
-        chatid: msg.chat_id || "",
-      }),
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data) return;
-        // UAZAPI pode retornar { url, base64, mimetype } — tentamos a URL primeiro
-        const url: string | undefined = data.url || data.mediaUrl || data.link;
-        if (url) {
-          setResolvedUrl(url);
-        } else if (data.base64) {
-          // Fallback: cria blob URL a partir do base64
-          const mime = data.mimetype || msg.mimetype || "application/octet-stream";
-          const byteChars = atob(data.base64);
-          const byteArr = new Uint8Array(byteChars.length);
-          for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
-          const blob = new Blob([byteArr], { type: mime });
-          setResolvedUrl(URL.createObjectURL(blob));
+      // ── Caso 2: URL já é pública e acessível (fileURL do UAZAPI storage) ────
+      if (msg.media_url && !msg.media_url.includes(".enc") &&
+          !msg.media_url.includes("mmg.whatsapp.net") &&
+          !msg.media_url.includes("fna.whatsapp.net")) {
+        setResolvedUrl(msg.media_url);
+        setLoading(false);
+        return;
+      }
+
+      // ── Caso 3: sem base64, chama POST /message/download ────────────────────
+      // Endpoint correto da UAZAPI: POST /message/download
+      // { id: messageId, return_link: true, generate_mp3: true (para áudio) }
+      if (!msg.raw_message_id) {
+        setResolvedUrl(msg.media_url || null);
+        setLoading(false);
+        return;
+      }
+
+      const type = (msg.type || "").toLowerCase();
+      const isAudio = type.includes("audio") || type.includes("ptt");
+
+      try {
+        const base = apiUrl.replace(/\/$/, "");
+        const r = await fetch(`${base}/message/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", token },
+          body: JSON.stringify({
+            id: msg.raw_message_id,
+            return_link: true,
+            generate_mp3: isAudio,   // áudio vira MP3 (melhor compatibilidade)
+            return_base64: false,
+          }),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          // Resposta: { fileURL, mimetype, base64Data, transcription }
+          const url: string | undefined = data.fileURL || data.url || data.link;
+          if (url) {
+            setResolvedUrl(url);
+          } else if (data.base64Data) {
+            const mime = data.mimetype || msg.mimetype || "application/octet-stream";
+            blobUrl = base64ToUrl(data.base64Data, mime);
+            setResolvedUrl(blobUrl);
+          } else {
+            setResolvedUrl(msg.media_url || null);
+          }
+        } else {
+          setResolvedUrl(msg.media_url || null);
         }
-      })
-      .catch(() => {
-        // Se download falhou, tenta a URL original como última tentativa
-        if (msg.media_url) setResolvedUrl(msg.media_url);
-      })
-      .finally(() => setLoading(false));
-  }, [msg.raw_message_id, msg.media_url, apiUrl, token]); // eslint-disable-line react-hooks/exhaustive-deps
+      } catch {
+        setResolvedUrl(msg.media_url || null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    resolve();
+
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [msg.raw_message_id, msg.base64_data, msg.media_url, apiUrl, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <>{children(resolvedUrl, loading)}</>;
 }
