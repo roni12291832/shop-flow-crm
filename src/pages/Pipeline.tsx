@@ -13,7 +13,6 @@ import {
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { LossReasonDialog } from "@/components/crm/LossReasonDialog";
-import { Send } from "lucide-react";
 
 const PYTHON_BACKEND_URL = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app";
 
@@ -49,12 +48,6 @@ export default function Pipeline() {
   const [pendingLossId, setPendingLossId] = useState<string | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editForm, setEditForm] = useState({ id: "", title: "", estimated_value: "", client_id: "", client_name: "", client_phone: "", client_email: "", client_city: "", client_notes: "", origin: "" });
-
-  // Bulk Message State
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [bulkStage, setBulkStage] = useState<{ value: string; label: string } | null>(null);
-  const [bulkText, setBulkText] = useState("");
-  const [bulkSending, setBulkSending] = useState(false);
 
   const fetchData = async () => {
         const [oppsRes, clientsRes] = await Promise.all([
@@ -158,57 +151,6 @@ export default function Pipeline() {
     else { toast.success("Lead atualizado!"); setEditDialogOpen(false); fetchData(); }
   };
 
-  const openBulkMessage = (stage: { value: string; label: string }) => {
-    setBulkStage(stage);
-    setBulkText("");
-    setBulkDialogOpen(true);
-  };
-
-  const handleSendBulk = async () => {
-    if (!bulkStage || !bulkText) return;
-    setBulkSending(true);
-    try {
-      // 1. Gerar variações com Jarvis (Anti-Ban)
-      const varRes = await fetch(`${PYTHON_BACKEND_URL}/jarvis/variations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: bulkText })
-      });
-      const varData = await varRes.json();
-      
-      if (!varData.variations) {
-        throw new Error("Falha ao gerar variações da mensagem");
-      }
-
-      const variations = varData.variations.split(" ||| ");
-
-      // 2. Disparar Campanha via Python
-      const dispatchRes = await fetch(`${PYTHON_BACKEND_URL}/campaigns/dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `Disparo ${bulkStage.label} - ${new Date().toLocaleDateString()}`,
-          messages: variations,
-          target_stages: [bulkStage.value]
-        })
-      });
-
-      if (!dispatchRes.ok) {
-        const errorData = await dispatchRes.json();
-        throw new Error(errorData.detail || "Erro ao disparar campanha");
-      }
-
-      const result = await dispatchRes.json();
-      toast.success(`${result.sent} mensagens enviadas com sucesso!`);
-      setBulkDialogOpen(false);
-    } catch (err: any) {
-      console.error("Erro no disparo:", err);
-      toast.error(err.message || "Erro ao processar disparo");
-    } finally {
-      setBulkSending(false);
-    }
-  };
-
   const handleDragStart = (e: React.DragEvent, oppId: string) => {
     e.dataTransfer.setData("oppId", oppId);
   };
@@ -257,9 +199,6 @@ export default function Pipeline() {
               <div className="flex justify-between items-center mb-1">
                 <span className="text-foreground font-bold text-[13px]">{stage.label}</span>
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => openBulkMessage(stage)} className="text-muted-foreground hover:text-primary transition-colors cursor-pointer" title="Disparo em Massa para esta coluna">
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
                   <span className="text-[12px] font-bold rounded-full px-2 py-0.5" style={{ background: stage.color + "22", color: stage.color }}>{stageOpps.length}</span>
                 </div>
               </div>
@@ -295,7 +234,6 @@ export default function Pipeline() {
       </div>
 
       <LossReasonDialog open={lossDialogOpen} onOpenChange={setLossDialogOpen} onConfirm={confirmLoss} />
-
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Editar Lead</DialogTitle></DialogHeader>
@@ -330,28 +268,6 @@ export default function Pipeline() {
               <div className="space-y-1.5 col-span-2"><Label>Valor estimado (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
             </div>
             <Button onClick={handleEdit} className="w-full">Salvar</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Disparo em Massa: {bulkStage?.label}</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Esta mensagem será enviada pelo WhatsApp para todos os {opportunities.filter(o => o.stage === bulkStage?.value && o.client_phone).length} leads com telefone nesta coluna.
-            </p>
-            <div className="space-y-2">
-              <Label>Mensagem</Label>
-              <textarea
-                className="w-full flex min-h-[120px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                placeholder="Ex: Olá! Vimos que você se interessou..."
-                value={bulkText}
-                onChange={e => setBulkText(e.target.value)}
-              />
-            </div>
-            <Button onClick={handleSendBulk} disabled={bulkSending || !bulkText} className="w-full gap-2">
-              {bulkSending ? "Enviando..." : <><Send className="h-4 w-4" /> Enviar Disparo</>}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
