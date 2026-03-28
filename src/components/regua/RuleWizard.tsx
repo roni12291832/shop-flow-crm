@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,355 +7,591 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Package, Clock, Heart, Hand, MessageSquare, Mail, Smartphone, ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
+import {
+  Heart, ShoppingBag, ArrowLeft, ArrowRight, Check,
+  Sparkles, Trash2, Plus, Calendar, Clock, Info,
+  AlertCircle, CheckCircle2, Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
-interface RuleFormData {
+const PYTHON_BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const MIN_VARIATIONS = 15;
+
+// ─── Tipos ───────────────────────────────────────────────────────────────────
+
+export interface RuleFormData {
   name: string;
-  trigger_event: "after_purchase" | "no_purchase" | "birthday" | "manual";
-  delay_days: number;
-  channel: "whatsapp" | "sms" | "email";
+  trigger_event: "birthday" | "no_purchase";
+  channel: "whatsapp";
   message_template: string;
   active: boolean;
+  campaign_start: string;   // ISO datetime string
+  campaign_end: string;     // ISO datetime string
+  variations: string[];     // as 15 variações
 }
 
 interface RuleWizardProps {
   open: boolean;
   onClose: () => void;
-  onSave: (data: RuleFormData) => void;
+  onSave: (data: RuleFormData) => Promise<void>;
   initialData?: Partial<RuleFormData> & { id?: string };
 }
 
-const TRIGGER_OPTIONS = [
-  { value: "after_purchase" as const, icon: Package, label: "Após uma compra", desc: "Dispara X dias depois da compra", color: "text-accent" },
-  { value: "no_purchase" as const, icon: Clock, label: "Cliente sem comprar", desc: "Dispara quando inativo por X dias", color: "text-warning" },
-  { value: "birthday" as const, icon: Heart, label: "Aniversário", desc: "Envia no dia ou X dias antes", color: "text-destructive" },
-  { value: "manual" as const, icon: Hand, label: "Manual", desc: "Seleção manual de clientes", color: "text-muted-foreground" },
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const CHANNEL_OPTIONS = [
-  { value: "whatsapp" as const, icon: MessageSquare, label: "WhatsApp" },
-  { value: "email" as const, icon: Mail, label: "Email" },
-  { value: "sms" as const, icon: Smartphone, label: "SMS" },
-];
+function countWorkingDays(startIso: string, endIso: string): number {
+  if (!startIso || !endIso) return 0;
+  try {
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    if (end <= start) return 0;
+    let count = 0;
+    const cur = new Date(start);
+    while (cur <= end) {
+      if (cur.getDay() !== 0) count++; // exclui domingo
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
 
-const VARIABLES = [
-  { key: "{{nome}}", label: "+Nome" },
-  { key: "{{produto}}", label: "+Produto" },
-  { key: "{{loja}}", label: "+Loja" },
-  { key: "{{telefone}}", label: "+Telefone" },
-  { key: "{{data_compra}}", label: "+DataCompra" },
-];
+function toLocalDatetimeInput(iso: string): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return "";
+  }
+}
 
-const PREVIEW_DATA: Record<string, string> = {
-  "{{nome}}": "Maria Silva",
-  "{{produto}}": "Vestido Floral",
-  "{{loja}}": "Loja Premium",
-  "{{telefone}}": "(11) 99999-0001",
-  "{{data_compra}}": "05/03/2026",
-};
+function fromLocalDatetimeInput(local: string): string {
+  if (!local) return "";
+  return new Date(local).toISOString();
+}
+
+// ─── Componente ───────────────────────────────────────────────────────────────
 
 export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardProps) {
   const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [generatingVariations, setGeneratingVariations] = useState(false);
+
+  const defaultStart = () => {
+    const d = new Date();
+    d.setHours(8, 0, 0, 0);
+    return d.toISOString();
+  };
+  const defaultEnd = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    d.setHours(18, 0, 0, 0);
+    return d.toISOString();
+  };
+
   const [form, setForm] = useState<RuleFormData>({
     name: initialData?.name || "",
-    trigger_event: initialData?.trigger_event || "after_purchase",
-    delay_days: initialData?.delay_days || 3,
-    channel: initialData?.channel || "whatsapp",
+    trigger_event: initialData?.trigger_event || "birthday",
+    channel: "whatsapp",
     message_template: initialData?.message_template || "",
     active: initialData?.active ?? true,
+    campaign_start: initialData?.campaign_start || defaultStart(),
+    campaign_end: initialData?.campaign_end || defaultEnd(),
+    variations: initialData?.variations || [],
   });
 
-  const [isGenerating, setIsGenerating] = useState(false);
+  // Base message para enviar ao Jarvis
+  const [baseMessage, setBaseMessage] = useState(
+    initialData?.message_template?.split("|||")[0]?.trim() || "",
+  );
 
-  const updateForm = (key: keyof RuleFormData, value: any) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    if (open && initialData) {
+      setForm({
+        name: initialData.name || "",
+        trigger_event: initialData.trigger_event || "birthday",
+        channel: "whatsapp",
+        message_template: initialData.message_template || "",
+        active: initialData.active ?? true,
+        campaign_start: initialData.campaign_start || defaultStart(),
+        campaign_end: initialData.campaign_end || defaultEnd(),
+        variations: initialData.variations || [],
+      });
+      const base = initialData.message_template?.split("|||")[0]?.trim() || "";
+      setBaseMessage(base);
+      setStep(1);
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const update = <K extends keyof RuleFormData>(key: K, value: RuleFormData[K]) => {
+    setForm(prev => ({ ...prev, [key]: value }));
   };
 
-  const insertVariable = (variable: string) => {
-    updateForm("message_template", form.message_template + variable);
-  };
+  // ─── Jarvis: gera 15 variações ────────────────────────────────────────────
 
   const handleGenerateVariations = async () => {
-    if (!form.message_template) return;
-    setIsGenerating(true);
+    if (!baseMessage.trim()) {
+      toast.error("Escreva a mensagem base primeiro");
+      return;
+    }
+    setGeneratingVariations(true);
     try {
-      const resp = await fetch(`http://localhost:8000/jarvis/variations`, {
+      const resp = await fetch(`${PYTHON_BACKEND_URL}/jarvis/variations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: form.message_template }),
+        body: JSON.stringify({ message: baseMessage.trim(), count: MIN_VARIATIONS }),
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      if (data.variations) {
-        updateForm("message_template", data.variations);
-      }
-    } catch (error) {
-      console.error("Erro ao gerar variações:", error);
+      const vars: string[] = data.variations || [];
+      if (vars.length === 0) throw new Error("Nenhuma variação retornada");
+      update("variations", vars);
+      // Salva também no message_template como referência
+      update("message_template", baseMessage.trim());
+      toast.success(`${vars.length} variações geradas pelo Jarvis! ✨`);
+    } catch (err) {
+      toast.error("Erro ao gerar variações. Verifique o backend.");
+      console.error(err);
     } finally {
-      setIsGenerating(false);
+      setGeneratingVariations(false);
     }
   };
 
-  const previewMessage = () => {
-    let msg = form.message_template;
-    Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
-      msg = msg.split(key).join(val);
-    });
-    return msg;
+  const updateVariation = (idx: number, text: string) => {
+    const updated = [...form.variations];
+    updated[idx] = text;
+    update("variations", updated);
   };
 
-  const canNext = () => {
-    if (step === 1) return form.name.trim() !== "";
-    if (step === 2) return form.message_template.trim() !== "";
+  const removeVariation = (idx: number) => {
+    update("variations", form.variations.filter((_, i) => i !== idx));
+  };
+
+  const addVariation = () => {
+    update("variations", [...form.variations, ""]);
+  };
+
+  // ─── Validação ────────────────────────────────────────────────────────────
+
+  const canGoNext = () => {
+    if (step === 1) {
+      if (!form.name.trim()) return false;
+      if (form.trigger_event === "no_purchase") {
+        if (!form.campaign_start || !form.campaign_end) return false;
+        if (new Date(form.campaign_end) <= new Date(form.campaign_start)) return false;
+      }
+      return true;
+    }
+    if (step === 2) {
+      const validVars = form.variations.filter(v => v.trim().length > 0);
+      return validVars.length >= MIN_VARIATIONS;
+    }
     return true;
   };
 
-  const handleSave = () => {
-    onSave(form);
-    setStep(1);
-    setForm({ name: "", trigger_event: "after_purchase", delay_days: 3, channel: "whatsapp", message_template: "", active: true });
+  // ─── Save ─────────────────────────────────────────────────────────────────
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave({
+        ...form,
+        variations: form.variations.filter(v => v.trim().length > 0),
+      });
+      // Reset
+      setStep(1);
+      setBaseMessage("");
+      setForm({
+        name: "",
+        trigger_event: "birthday",
+        channel: "whatsapp",
+        message_template: "",
+        active: true,
+        campaign_start: defaultStart(),
+        campaign_end: defaultEnd(),
+        variations: [],
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
+  // ─── Cálculo da campanha ──────────────────────────────────────────────────
+
+  const workingDays = form.trigger_event === "no_purchase"
+    ? countWorkingDays(form.campaign_start, form.campaign_end)
+    : 0;
+  const estimatedMessages = workingDays * 40;
+  const validVariationsCount = form.variations.filter(v => v.trim().length > 0).length;
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose(); setStep(1); } }}>
-      <DialogContent className="sm:max-w-[560px] bg-card border-border">
+    <Dialog open={open} onOpenChange={o => { if (!o) { onClose(); setStep(1); } }}>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-card border-border">
         <DialogHeader>
           <DialogTitle className="text-foreground">
             {initialData?.id ? "Editar Régua" : "Nova Régua de Relacionamento"}
           </DialogTitle>
+          {/* Progress bar */}
           <div className="flex gap-2 mt-2">
-            {[1, 2, 3].map((s) => (
+            {[1, 2, 3].map(s => (
               <div
                 key={s}
                 className={cn(
                   "h-1.5 flex-1 rounded-full transition-colors",
-                  s <= step ? "bg-primary" : "bg-muted"
+                  s <= step ? "bg-primary" : "bg-muted",
                 )}
               />
             ))}
           </div>
+          <p className="text-xs text-muted-foreground">
+            {step === 1 ? "Configuração" : step === 2 ? "Mensagens" : "Revisão"}
+          </p>
         </DialogHeader>
 
-        {/* Step 1 - Trigger */}
+        {/* ── Step 1: Tipo + Configuração ── */}
         {step === 1 && (
-          <div className="space-y-4 py-2">
+          <div className="space-y-5 py-1">
+            {/* Nome */}
             <div>
               <Label className="text-foreground">Nome da régua</Label>
               <Input
-                placeholder="Ex: Satisfação pós-compra"
-                value={form.name}
-                onChange={(e) => updateForm("name", e.target.value)}
                 className="mt-1.5"
+                placeholder="Ex: Feliz Aniversário clientes, Campanha Verão 2026..."
+                value={form.name}
+                onChange={e => update("name", e.target.value)}
               />
             </div>
 
+            {/* Tipo */}
             <div>
-              <Label className="text-foreground mb-2 block">Tipo de gatilho</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {TRIGGER_OPTIONS.map((opt) => (
-                  <Card
-                    key={opt.value}
-                    className={cn(
-                      "p-3 cursor-pointer transition-all border-2",
-                      form.trigger_event === opt.value
-                        ? "border-primary bg-primary/10"
-                        : "border-border hover:border-primary/30"
-                    )}
-                    onClick={() => updateForm("trigger_event", opt.value)}
-                  >
-                    <opt.icon className={cn("h-5 w-5 mb-1", opt.color)} />
-                    <p className="text-sm font-medium text-foreground">{opt.label}</p>
-                    <p className="text-xs text-muted-foreground">{opt.desc}</p>
-                  </Card>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-foreground">
-                {form.trigger_event === "birthday" ? "Dias antes do aniversário" : "Dias após o evento"}
-              </Label>
-              <Input
-                type="number"
-                min={0}
-                value={form.delay_days}
-                onChange={(e) => updateForm("delay_days", parseInt(e.target.value) || 0)}
-                className="mt-1.5 w-32"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Step 2 - Message */}
-        {step === 2 && (
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-foreground mb-2 block">Canal de envio</Label>
-              <div className="flex gap-2">
-                {CHANNEL_OPTIONS.map((opt) => (
-                  <Button
-                    key={opt.value}
-                    variant={form.channel === opt.value ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => updateForm("channel", opt.value)}
-                    className="gap-1.5"
-                  >
-                    <opt.icon className="h-4 w-4" />
-                    {opt.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-foreground">Mensagem</Label>
-              <div className="flex items-center justify-between gap-1.5 mt-1.5 mb-2">
-                <div className="flex gap-1.5 flex-wrap">
-                  {VARIABLES.map((v) => (
-                    <Badge
-                      key={v.key}
-                      variant="secondary"
-                      className="cursor-pointer hover:bg-primary/20 text-xs"
-                      onClick={() => insertVariable(v.key)}
-                    >
-                      {v.label}
-                    </Badge>
-                  ))}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[10px] gap-1 bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
-                  onClick={handleGenerateVariations}
-                  disabled={isGenerating || !form.message_template}
-                >
-                  <Sparkles className={cn("h-3 w-3", isGenerating && "animate-spin")} />
-                  {isGenerating ? "Gerando..." : "Gerar 15 variações com Jarvis"}
-                </Button>
-              </div>
-              <Textarea
-                placeholder="Escreva sua mensagem aqui... Use ||| para separar variações."
-                value={form.message_template}
-                onChange={(e) => updateForm("message_template", e.target.value)}
-                rows={form.message_template.includes("|||") ? 5 : 4}
-                className="font-mono text-xs"
-              />
-              
-              {form.message_template.includes("|||") && (
-                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto border border-border/50 rounded-md p-2 bg-secondary/20">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">🔍 Lista de Variações (O robô enviará apenas 1 destas para cada pessoa):</p>
-                  {form.message_template.split("|||").filter(m => m.trim()).map((m, idx) => (
-                    <div key={idx} className="text-[10px] p-1.5 bg-background rounded border border-border/30 flex gap-2">
-                      <span className="text-primary font-bold">#{idx + 1}</span>
-                      <span className="text-muted-foreground truncate">{m.trim()}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              {form.channel === "sms" && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {form.message_template.length}/160 caracteres
-                </p>
-              )}
-              {form.channel === "whatsapp" && (
-                <div className="bg-primary/10 border border-primary/20 rounded-md p-3 mt-2 text-xs text-primary/80">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="font-semibold text-primary">Sistema Anti-Bloqueio WhatsApp:</p>
-                    {form.message_template.includes("|||") && (
-                      <Badge variant="outline" className="bg-primary/20 border-primary/30 text-[10px] h-5">
-                        {form.message_template.split("|||").filter(m => m.trim()).length} variações detectadas
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="opacity-80">
-                    O sistema rotacionará as mensagens e aplicará delays aleatórios (3s a 30s) para cada cliente.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {form.message_template && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label className="text-foreground text-xs">👀 Preview (Exemplo de 1 variação)</Label>
-                  {form.message_template.includes("|||") && (
-                    <p className="text-[10px] text-muted-foreground">O sistema escolhe 1 por cliente aleatoriamente</p>
+              <Label className="text-foreground mb-2 block">Tipo de envio</Label>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Birthday */}
+                <Card
+                  className={cn(
+                    "p-4 cursor-pointer transition-all border-2",
+                    form.trigger_event === "birthday"
+                      ? "border-rose-500 bg-rose-500/10"
+                      : "border-border hover:border-rose-300",
                   )}
-                </div>
-                <Card className="p-3 bg-secondary/30 border-border border-dashed">
-                  <p className="text-sm text-foreground whitespace-pre-wrap">
-                    {(() => {
-                      const variants = form.message_template.split("|||").filter(m => m.trim());
-                      let msg = variants[0] || ""; // Show first as example
-                      Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
-                        msg = msg.split(key).join(val);
-                      });
-                      return msg;
-                    })()}
+                  onClick={() => update("trigger_event", "birthday")}
+                >
+                  <Heart className="h-6 w-6 text-rose-500 mb-2" />
+                  <p className="text-sm font-semibold text-foreground">Aniversariantes</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Envia para todos que fazem aniversário no dia. Sem limite de mensagens.
                   </p>
+                  <Badge className="mt-2 bg-rose-500/10 text-rose-500 border-rose-500/30 text-[10px]">
+                    Sem limite • Qualquer dia
+                  </Badge>
                 </Card>
+
+                {/* Buyers */}
+                <Card
+                  className={cn(
+                    "p-4 cursor-pointer transition-all border-2",
+                    form.trigger_event === "no_purchase"
+                      ? "border-amber-500 bg-amber-500/10"
+                      : "border-border hover:border-amber-300",
+                  )}
+                  onClick={() => update("trigger_event", "no_purchase")}
+                >
+                  <ShoppingBag className="h-6 w-6 text-amber-500 mb-2" />
+                  <p className="text-sm font-semibold text-foreground">Campanha para Compradores</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Envia para todos que já compraram. 40 mensagens/dia, Seg–Sáb.
+                  </p>
+                  <Badge className="mt-2 bg-amber-500/10 text-amber-500 border-amber-500/30 text-[10px]">
+                    40/dia • Seg–Sáb • 08–12h e 13–18h
+                  </Badge>
+                </Card>
+              </div>
+            </div>
+
+            {/* Campaign dates — só para compradores */}
+            {form.trigger_event === "no_purchase" && (
+              <div className="space-y-3 p-4 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                <div className="flex items-center gap-2 text-amber-600">
+                  <Calendar className="h-4 w-4" />
+                  <span className="text-sm font-medium">Período da Campanha</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Início</Label>
+                    <Input
+                      type="datetime-local"
+                      className="mt-1 text-xs"
+                      value={toLocalDatetimeInput(form.campaign_start)}
+                      onChange={e => update("campaign_start", fromLocalDatetimeInput(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Término</Label>
+                    <Input
+                      type="datetime-local"
+                      className="mt-1 text-xs"
+                      value={toLocalDatetimeInput(form.campaign_end)}
+                      onChange={e => update("campaign_end", fromLocalDatetimeInput(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* Estimativa */}
+                {workingDays > 0 && (
+                  <div className="bg-background/60 rounded-md p-3 border border-amber-500/20">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-muted-foreground">Dias úteis (Seg–Sáb):</span>
+                      <span className="font-semibold text-foreground">{workingDays} dias</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs mt-1">
+                      <span className="text-muted-foreground">Máx. mensagens totais:</span>
+                      <span className="font-semibold text-amber-600">{estimatedMessages.toLocaleString("pt-BR")} msgs</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs mt-1">
+                      <span className="text-muted-foreground">Por dia:</span>
+                      <span className="text-foreground">20 manhã + 20 tarde</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-2">
+                      💡 Cada comprador recebe apenas 1 mensagem por campanha. Se você tiver mais compradores que o limite, alguns não receberão.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Info Birthday */}
+            {form.trigger_event === "birthday" && (
+              <div className="flex items-start gap-2 p-3 bg-rose-500/5 border border-rose-500/20 rounded-lg text-xs text-muted-foreground">
+                <Info className="h-3.5 w-3.5 text-rose-500 shrink-0 mt-0.5" />
+                <p>
+                  A régua de aniversário roda todos os dias e envia automaticamente para todos os clientes
+                  que fazem aniversário naquele dia. Sem limite de envio — todos recebem a mensagem.
+                </p>
               </div>
             )}
           </div>
         )}
 
-        {/* Step 3 - Review */}
+        {/* ── Step 2: Mensagens ── */}
+        {step === 2 && (
+          <div className="space-y-4 py-1">
+            {/* Mensagem base + botão Jarvis */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <Label className="text-foreground">Mensagem base</Label>
+                <span className="text-[10px] text-muted-foreground">O Jarvis vai criar {MIN_VARIATIONS} variações a partir desta</span>
+              </div>
+              <Textarea
+                placeholder={
+                  form.trigger_event === "birthday"
+                    ? "Ex: Olá {nome}! 🎂 Hoje é um dia especial! Feliz aniversário! A nossa equipe te deseja um dia incrível. 🥳"
+                    : "Ex: Olá {nome}! Temos novidades incríveis para você. Confira as últimas coleções da nossa loja! 👗"
+                }
+                value={baseMessage}
+                onChange={e => setBaseMessage(e.target.value)}
+                rows={3}
+                className="text-sm"
+              />
+              <div className="flex gap-1.5 mt-2 flex-wrap">
+                <Badge
+                  variant="secondary"
+                  className="cursor-pointer hover:bg-primary/20 text-xs"
+                  onClick={() => setBaseMessage(prev => prev + "{nome}")}
+                >
+                  + Nome
+                </Badge>
+              </div>
+            </div>
+
+            {/* Botão Jarvis */}
+            <Button
+              className="w-full gap-2 gradient-primary text-primary-foreground"
+              onClick={handleGenerateVariations}
+              disabled={generatingVariations || !baseMessage.trim()}
+            >
+              {generatingVariations ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Gerando com Jarvis...</>
+              ) : (
+                <><Sparkles className="h-4 w-4" /> Gerar {MIN_VARIATIONS} Variações com Jarvis</>
+              )}
+            </Button>
+
+            {/* Status das variações */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {validVariationsCount >= MIN_VARIATIONS ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                )}
+                <span className="text-sm font-medium">
+                  {validVariationsCount} de {MIN_VARIATIONS} variações
+                  {validVariationsCount >= MIN_VARIATIONS ? " ✓" : " (mínimo necessário)"}
+                </span>
+              </div>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={addVariation}>
+                <Plus className="h-3 w-3" /> Adicionar
+              </Button>
+            </div>
+
+            {/* Anti-ban info */}
+            <div className="flex items-start gap-2 p-3 bg-primary/5 border border-primary/20 rounded-lg text-xs">
+              <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+              <p className="text-muted-foreground">
+                <strong className="text-primary">Anti-bloqueio WhatsApp:</strong> cada cliente recebe
+                uma variação diferente selecionada aleatoriamente. Com {MIN_VARIATIONS}+ variações,
+                o padrão de envio parece manual para o WhatsApp.
+              </p>
+            </div>
+
+            {/* Lista de variações */}
+            {form.variations.length > 0 && (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {form.variations.map((variation, idx) => (
+                  <div key={idx} className="flex gap-2 items-start">
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 rounded px-1.5 py-1 shrink-0 mt-1">
+                      #{idx + 1}
+                    </span>
+                    <Textarea
+                      value={variation}
+                      onChange={e => updateVariation(idx, e.target.value)}
+                      rows={2}
+                      className="text-xs flex-1 resize-none"
+                      placeholder={`Variação ${idx + 1}...`}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive shrink-0 mt-1"
+                      onClick={() => removeVariation(idx)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {form.variations.length === 0 && (
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p>Escreva a mensagem base e clique em "Gerar com Jarvis"</p>
+                <p className="text-xs mt-1">ou adicione variações manualmente</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 3: Revisão ── */}
         {step === 3 && (
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-1">
             <Card className="p-4 bg-secondary/50 border-border space-y-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Régua</p>
+              <div className="flex items-center gap-2">
+                {form.trigger_event === "birthday"
+                  ? <Heart className="h-4 w-4 text-rose-500" />
+                  : <ShoppingBag className="h-4 w-4 text-amber-500" />
+                }
                 <p className="text-sm font-semibold text-foreground">{form.name}</p>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Gatilho</p>
-                <p className="text-sm text-foreground">
-                  {TRIGGER_OPTIONS.find((t) => t.value === form.trigger_event)?.label} • {form.delay_days} dias
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Canal</p>
-                <p className="text-sm text-foreground">
-                  {CHANNEL_OPTIONS.find((c) => c.value === form.channel)?.label}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Mensagem</p>
-                <div className="bg-background/50 p-2 rounded border border-border mt-1">
-                  <p className="text-sm text-foreground whitespace-pre-wrap">
-                    {(() => {
-                        const variants = form.message_template.split("|||").filter(m => m.trim());
-                        let msg = variants[0] || "";
-                        Object.entries(PREVIEW_DATA).forEach(([key, val]) => {
-                          msg = msg.split(key).join(val);
-                        });
-                        return msg;
-                      })()}
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Tipo</p>
+                  <p className="text-foreground font-medium">
+                    {form.trigger_event === "birthday" ? "Aniversariantes" : "Compradores"}
                   </p>
-                  {form.message_template.includes("|||") && (
-                    <div className="mt-2 pt-2 border-t border-border flex items-center justify-between">
-                      <span className="text-[10px] text-primary font-medium flex items-center gap-1">
-                         <Sparkles className="h-2.5 w-2.5" />
-                         Contém {form.message_template.split("|||").filter(m => m.trim()).length} variações seguras
-                      </span>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Canal</p>
+                  <p className="text-foreground font-medium">WhatsApp</p>
+                </div>
+                {form.trigger_event === "no_purchase" && (
+                  <>
+                    <div>
+                      <p className="text-muted-foreground">Início</p>
+                      <p className="text-foreground font-medium">
+                        {new Date(form.campaign_start).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
                     </div>
+                    <div>
+                      <p className="text-muted-foreground">Término</p>
+                      <p className="text-foreground font-medium">
+                        {new Date(form.campaign_end).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Dias úteis</p>
+                      <p className="text-foreground font-medium">{workingDays} dias</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Máx. mensagens</p>
+                      <p className="text-amber-600 font-bold">{estimatedMessages.toLocaleString("pt-BR")}</p>
+                    </div>
+                  </>
+                )}
+                {form.trigger_event === "birthday" && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Envio</p>
+                    <p className="text-foreground font-medium">Automático • Todo dia • Sem limite</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Variações */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs text-muted-foreground">Variações de mensagem</p>
+                  <Badge variant={validVariationsCount >= MIN_VARIATIONS ? "default" : "destructive"} className="text-[10px]">
+                    {validVariationsCount} variações
+                  </Badge>
+                </div>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {form.variations.filter(v => v.trim()).slice(0, 3).map((v, i) => (
+                    <div key={i} className="bg-background/50 rounded p-1.5 border border-border/30 text-[11px] text-muted-foreground truncate">
+                      <span className="text-primary font-bold mr-1.5">#{i + 1}</span>{v}
+                    </div>
+                  ))}
+                  {validVariationsCount > 3 && (
+                    <p className="text-[10px] text-muted-foreground text-center">
+                      + {validVariationsCount - 3} variações adicionais
+                    </p>
                   )}
                 </div>
               </div>
+
+              {/* Regras de envio */}
+              {form.trigger_event === "no_purchase" && (
+                <div className="bg-amber-500/10 rounded p-2 border border-amber-500/20">
+                  <p className="text-[11px] text-amber-700 font-medium mb-1">Regras de envio:</p>
+                  <ul className="text-[11px] text-muted-foreground space-y-0.5">
+                    <li>• Manhã: 20 mensagens distribuídas das 08h às 12h</li>
+                    <li>• Tarde: 20 mensagens distribuídas das 13h às 18h</li>
+                    <li>• Delay aleatório de 1–3 min entre mensagens</li>
+                    <li>• Cada comprador recebe variação diferente</li>
+                    <li>• Nunca envia no domingo</li>
+                  </ul>
+                </div>
+              )}
             </Card>
 
             <div className="flex items-center justify-between">
               <Label className="text-foreground">Ativar imediatamente</Label>
-              <Switch checked={form.active} onCheckedChange={(v) => updateForm("active", v)} />
+              <Switch checked={form.active} onCheckedChange={v => update("active", v)} />
             </div>
           </div>
         )}
 
-        <div className="flex justify-between pt-2">
+        {/* ── Botões de navegação ── */}
+        <div className="flex justify-between pt-2 border-t border-border mt-2">
           <Button
             variant="outline"
-            onClick={() => (step > 1 ? setStep(step - 1) : onClose())}
+            onClick={() => step > 1 ? setStep(step - 1) : onClose()}
             className="gap-1.5"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -363,14 +599,21 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
           </Button>
 
           {step < 3 ? (
-            <Button onClick={() => setStep(step + 1)} disabled={!canNext()} className="gap-1.5">
+            <Button onClick={() => setStep(step + 1)} disabled={!canGoNext()} className="gap-1.5">
               Próximo
               <ArrowRight className="h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={handleSave} className="gap-1.5 gradient-primary text-primary-foreground">
-              <Check className="h-4 w-4" />
-              Salvar Régua
+            <Button
+              onClick={handleSave}
+              disabled={saving || validVariationsCount < MIN_VARIATIONS}
+              className="gap-1.5 gradient-primary text-primary-foreground"
+            >
+              {saving ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Salvando...</>
+              ) : (
+                <><Check className="h-4 w-4" /> Salvar Régua</>
+              )}
             </Button>
           )}
         </div>

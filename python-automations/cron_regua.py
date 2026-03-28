@@ -1,244 +1,191 @@
 from __future__ import annotations
 """
-Cron de Régua de Relacionamento.
-Processa regras ativas baseadas em eventos (after_purchase, no_purchase, birthday).
-Gera variações automáticas via OpenAI se não houver suficiente no banco.
-Roda via APScheduler (main.py) — a cada 30 minutos.
+Cron de Régua de Relacionamento — 2 tipos:
+
+1. ANIVERSARIANTES (birthday)
+   - Sem limite de envio
+   - Roda qualquer dia da semana
+   - Envia para TODOS que fazem aniversário no dia atual
+
+2. CAMPANHA PARA COMPRADORES (no_purchase / buyers)
+   - Apenas Segunda a Sábado
+   - 40 mensagens/dia: 20 manhã (08h–12h) + 20 tarde (13h–18h)
+   - Distribuição aleatória dentro de cada slot
+   - Delay aleatório 60–180s entre mensagens (anti-ban)
+   - Cada pessoa recebe variação diferente (15 variações obrigatórias)
+   - Rastreia quem já recebeu a campanha (não repete)
+   - Desativa automaticamente quando campanha encerra ou todos receberam
+
+Roda via APScheduler a cada 30 minutos (main.py).
 """
 import asyncio
-import json
-import re
+import math
 import random
 from datetime import datetime, timedelta, date, timezone
 
-from openai import AsyncOpenAI
 from core import logger, DRY_RUN, registrar_automacao, alertar_dono
 from supabase_client import get_supabase
 from uazapi_client import uazapi
-from config import get_settings
 
-MIN_VARIATIONS = 15  # Anti-ban WhatsApp
-
-# Janela de disparo: 08h–18h Brasília (UTC-3 fixo — SP não usa mais horário de verão)
+# ─── Constantes ───────────────────────────────────────────────────────────────
 BRT = timezone(timedelta(hours=-3))
-WINDOW_START = 8
-WINDOW_END   = 18
+
+# Janela de disparos para Compradores
+MORNING_START    = 8    # 08:00 BRT
+MORNING_END      = 12   # 12:00 BRT  (última msg sai antes das 12h)
+AFTERNOON_START  = 13   # 13:00 BRT
+AFTERNOON_END    = 18   # 18:00 BRT  (última msg sai antes das 18h)
+
+MORNING_QUOTA    = 20   # máx 20 mensagens pela manhã
+AFTERNOON_QUOTA  = 20   # máx 20 mensagens à tarde
+DAILY_QUOTA      = MORNING_QUOTA + AFTERNOON_QUOTA  # 40 total
+
+CRON_INTERVAL    = 30   # minutos entre execuções do cron (APScheduler)
+MIN_VARIATIONS   = 15   # anti-ban: mínimo obrigatório de variações
+MIN_DELAY_SEC    = 60   # delay mínimo entre mensagens (1 min)
+MAX_DELAY_SEC    = 180  # delay máximo entre mensagens (3 min)
 
 
-def _is_within_window() -> bool:
-    """Retorna True se estiver dentro da janela de disparo (08h-18h BRT)."""
-    return WINDOW_START <= datetime.now(BRT).hour < WINDOW_END
+# ─── Helpers de tempo ─────────────────────────────────────────────────────────
+
+def _is_weekday() -> bool:
+    """True se hoje for Segunda(0) a Sábado(5). Domingo(6) = False."""
+    return datetime.now(BRT).weekday() < 6
 
 
-def _parse_gpt_json(content: str) -> dict:
+def _get_current_slot() -> str | None:
+    """Retorna 'morning', 'afternoon' ou None se fora da janela de disparos."""
+    h = datetime.now(BRT).hour
+    if MORNING_START <= h < MORNING_END:
+        return "morning"
+    if AFTERNOON_START <= h < AFTERNOON_END:
+        return "afternoon"
+    return None
+
+
+def _minutes_until_slot_end(slot: str) -> int:
+    """Minutos restantes até o fim do slot atual."""
+    now = datetime.now(BRT)
+    end_h = MORNING_END if slot == "morning" else AFTERNOON_END
+    slot_end = now.replace(hour=end_h, minute=0, second=0, microsecond=0)
+    return max(0, int((slot_end - now).total_seconds() / 60))
+
+
+def _get_batch_size(slot_quota: int, already_sent: int, minutes_until_end: int) -> int:
     """
-    Extrai JSON da resposta do GPT de forma robusta.
-    Lida com: JSON puro, JSON em bloco ```json```, JSON embutido em texto.
+    Calcula quantas mensagens enviar nesta execução do cron para distribuir
+    de forma natural ao longo do slot (sem sobrecarregar uma única execução).
     """
-    content = content.strip()
-    # Nível 1: parse direto
+    remaining = slot_quota - already_sent
+    if remaining <= 0:
+        return 0
+    # Quantas execuções restam neste slot?
+    runs_left = max(1, math.ceil(minutes_until_end / CRON_INTERVAL))
+    # Média por execução + jitter de ±1
+    base = math.ceil(remaining / runs_left)
+    jitter = random.randint(0, 1)
+    return min(remaining, base + jitter)
+
+
+# ─── Helpers de banco ─────────────────────────────────────────────────────────
+
+def _get_variations(db, rule: dict) -> list[str]:
+    """
+    Busca variações de mensagem para a regra.
+    Ordem de prioridade:
+      1. Tabela relationship_message_variations (via wizard)
+      2. message_template separado por ||| (legado)
+    """
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        pass
-    # Nível 2: extrai bloco ```json ... ``` ou ``` ... ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
-    # Nível 3: encontra qualquer { ... } no texto
-    match = re.search(r"\{[^{}]+\}", content, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    raise ValueError(f"Nenhum JSON válido encontrado em: {content[:120]}")
-
-
-def _random_delay() -> int:
-    """Delay aleatório anti-ban: entre 15 e 60 segundos."""
-    return random.randint(15, 60)
-
-
-async def _generate_and_save_variations(rule: dict, db, openai_client) -> list[str]:
-    """
-    Gera MIN_VARIATIONS variações via GPT e salva no banco.
-    Chamada tanto no job de pré-geração (06h) quanto como último recurso no disparo.
-    """
-    base = rule.get("message_template", "")
-    if not base:
-        logger.warning("Regra '%s' sem message_template — impossível gerar variações", rule["name"])
-        return []
-
-    logger.info("Gerando %d variações para regra '%s' com IA...", MIN_VARIATIONS, rule["name"])
-    try:
-        prompt = f"""Gere exatamente {MIN_VARIATIONS} variações diferentes desta mensagem de WhatsApp para uma loja de roupas.
-Cada variação deve ter tom e estrutura ligeiramente diferentes, mas transmitir a mesma mensagem.
-Use as variáveis {{nome}} e {{produto}} onde fizer sentido.
-Retorne SOMENTE um JSON: {{"variations": ["msg1", "msg2", ...]}}
-
-Mensagem base: {base}"""
-
-        resp = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,  # Reduzido de 0.9 para variações mais coerentes
-            max_tokens=2500,
-        )
-        content = resp.choices[0].message.content or ""
-        try:
-            result = _parse_gpt_json(content)
-        except ValueError as parse_err:
-            logger.warning("Erro ao parsear JSON de variações para '%s': %s", rule["name"], parse_err)
-            return []
-        generated = result.get("variations", [])
-
-        if len(generated) >= MIN_VARIATIONS:
-            # Insere PRIMEIRO as novas, depois apaga as antigas — se o insert falhar,
-            # as variações antigas permanecem intactas (nunca ficamos sem variações).
-            try:
-                rows = [{"rule_id": rule["id"], "content": v} for v in generated]
-                insert_res = db.table("relationship_message_variations").insert(rows).execute()
-                if insert_res.data:
-                    # Insert OK → agora apaga as antigas (que não incluem as recém-inseridas)
-                    new_ids = [r["id"] for r in insert_res.data]
-                    db.table("relationship_message_variations").delete().eq(
-                        "rule_id", rule["id"]
-                    ).not_.in_("id", new_ids).execute()
-                    logger.info("Variações salvas no banco para regra '%s' (%d)", rule["name"], len(generated))
-                else:
-                    logger.warning("Insert de variações retornou vazio para regra '%s'", rule["name"])
-            except Exception as save_err:
-                logger.warning("Erro ao salvar variações: %s", save_err)
-            return generated
-
-    except Exception as e:
-        logger.warning("Erro ao gerar variações com IA para regra '%s': %s", rule["name"], e)
-
-    return []
-
-
-async def _get_or_generate_variations(rule: dict, db, openai_client) -> list[str]:
-    """
-    Busca variações salvas no banco para a regra.
-    Só chama IA se não houver suficiente — o job de pré-geração (06h) deve ter
-    garantido que as variações já estão no banco antes dos disparos.
-    """
-    # 1. Tenta buscar da tabela relationship_message_variations
-    try:
-        var_res = (
+        res = (
             db.table("relationship_message_variations")
             .select("content")
             .eq("rule_id", rule["id"])
             .execute()
         )
-        variations = [v["content"] for v in (var_res.data or [])]
-    except Exception:
-        variations = []
+        items = [v["content"] for v in (res.data or []) if v.get("content")]
+        if len(items) >= MIN_VARIATIONS:
+            return items
+    except Exception as e:
+        logger.warning("Erro ao buscar relationship_message_variations: %s", e)
 
-    # 2. Fallback: divide message_template por ||| (formato legado)
-    if len(variations) < MIN_VARIATIONS:
-        raw = rule.get("message_template", "")
-        if raw:
-            parts = [p.strip() for p in raw.split("|||") if p.strip()]
-            if len(parts) >= MIN_VARIATIONS:
-                return parts
+    # Fallback: ||| no message_template
+    raw = rule.get("message_template", "")
+    if raw:
+        parts = [p.strip() for p in raw.split("|||") if p.strip()]
+        if len(parts) >= MIN_VARIATIONS:
+            return parts
 
-    # 3. Último recurso: gera com IA agora (lento, pode falhar)
-    if len(variations) < MIN_VARIATIONS:
-        logger.warning(
-            "Regra '%s' sem variações suficientes (%d/%d) — gerando em tempo real (job 06h não rodou?)",
-            rule["name"], len(variations), MIN_VARIATIONS,
-        )
-        variations = await _generate_and_save_variations(rule, db, openai_client)
-
-    return variations
+    return []
 
 
-async def job_ensure_variations() -> None:
-    """
-    Job de pré-geração: garante que todas as réguas ativas têm variações suficientes.
-    Roda às 06h todo dia via APScheduler — antes da janela de disparos (08h-18h).
-    Separa a geração de IA do momento do disparo para máxima robustez.
-    """
-    logger.info("job_ensure_variations: verificando variações de todas as réguas ativas")
-    db = get_supabase()
-    s = get_settings()
-    openai_client = AsyncOpenAI(api_key=s.openai_api_key)
-
-    rules_res = db.table("relationship_rules").select("*").eq("active", True).execute()
-    active_rules = rules_res.data or []
-
-    if not active_rules:
-        logger.info("job_ensure_variations: nenhuma régua ativa")
-        return
-
-    for rule in active_rules:
-        try:
-            count_res = (
-                db.table("relationship_message_variations")
-                .select("id", count="exact")
-                .eq("rule_id", rule["id"])
-                .execute()
-            )
-            count = count_res.count or 0
-            if count < MIN_VARIATIONS:
-                logger.info(
-                    "Régua '%s' tem %d/%d variações — gerando agora",
-                    rule["name"], count, MIN_VARIATIONS,
-                )
-                await _generate_and_save_variations(rule, db, openai_client)
-            else:
-                logger.info("Régua '%s': %d variações OK", rule["name"], count)
-        except Exception as e:
-            logger.error("Erro ao verificar variações da régua '%s': %s", rule.get("name"), e)
-
-
-async def _already_sent_today(db, rule_id: str, client_id: str) -> bool:
-    """Verifica se já foi disparado para este cliente hoje."""
-    today = date.today().isoformat()
+def _count_slot_sends_today(db, rule_id: str, slot: str) -> int:
+    """Conta mensagens enviadas com sucesso hoje neste slot (morning ou afternoon)."""
+    today = datetime.now(BRT).date().isoformat()
+    start_h = MORNING_START if slot == "morning" else AFTERNOON_START
+    end_h   = MORNING_END   if slot == "morning" else AFTERNOON_END
+    start_dt = f"{today}T{start_h:02d}:00:00-03:00"
+    end_dt   = f"{today}T{end_h:02d}:00:00-03:00"
     try:
-        check = (
+        res = (
             db.table("relationship_executions")
-            .select("id")
+            .select("id", count="exact")
             .eq("rule_id", rule_id)
-            .eq("customer_id", client_id)
-            .gte("scheduled_for", today)
+            .eq("status", "concluido")
+            .gte("sent_at", start_dt)
+            .lt("sent_at", end_dt)
             .execute()
         )
-        return bool(check.data)
+        return res.count or 0
     except Exception:
-        return False
+        return 0
 
 
-async def _dispatch_to_client(
-    rule: dict,
-    client: dict,
-    variations: list[str],
-    wp_config: dict,
-    db,
-) -> bool | str:
+def _get_pending_clients(db, rule_id: str, all_clients: list[dict]) -> list[dict]:
+    """Filtra clientes que ainda não receberam esta campanha (qualquer envio bem-sucedido)."""
+    if not all_clients:
+        return []
+    try:
+        res = (
+            db.table("relationship_executions")
+            .select("customer_id")
+            .eq("rule_id", rule_id)
+            .eq("status", "concluido")
+            .execute()
+        )
+        already_sent = {r["customer_id"] for r in (res.data or [])}
+        return [c for c in all_clients if c["id"] not in already_sent]
+    except Exception as e:
+        logger.warning("Erro ao buscar execuções da campanha: %s", e)
+        return all_clients
+
+
+def _personalize(message: str, client: dict) -> str:
+    """Substitui variáveis da mensagem com dados do cliente."""
+    name = client.get("name", "") or ""
+    for token in ("{nome}", "{{nome}}"):
+        message = message.replace(token, name)
+    return message
+
+
+# ─── Dispatch ─────────────────────────────────────────────────────────────────
+
+async def _dispatch(rule: dict, client: dict, variations: list[str], wp_config: dict, db) -> bool | str:
     """
-    Envia uma variação aleatória de mensagem para o cliente.
-
-    Retorna:
-      True        — enviado com sucesso
-      False       — erro genérico (continua o loop)
-      "rate_limit" — rate limit da UAZAPI (deve parar o loop imediatamente)
+    Envia uma variação aleatória para o cliente.
+    Retorna True (sucesso), False (falha), ou str com código de erro crítico.
     """
     phone = client.get("phone", "")
     if not phone:
+        logger.warning("Cliente '%s' sem telefone — pulando", client.get("name"))
         return False
 
     variation = random.choice(variations)
-    personalized = uazapi._personalize_message(variation, client)
+    personalized = _personalize(variation, client)
 
     if DRY_RUN:
-        logger.info("[DRY_RUN] Enviaria para %s: %.60s...", client.get("name"), personalized)
-        success = True
+        logger.info("[DRY_RUN] Para %s: %.70s...", client.get("name"), personalized)
+        result_ok = True
         error_code = None
     else:
         resp = await uazapi.send_text(
@@ -250,223 +197,327 @@ async def _dispatch_to_client(
             instance_token=wp_config.get("instance_token"),
         )
         error_code = resp.get("error_code") if "error" in resp else None
-        success = "error" not in resp
+        result_ok = "error" not in resp
 
-        # Rate limit ou auth error — sinaliza para parar o loop
         if error_code in ("rate_limit", "auth_error"):
             logger.warning(
-                "Régua '%s': %s — interrompendo disparos para %s",
+                "Régua '%s': erro %s para %s — interrompendo",
                 rule["name"], error_code, client.get("name"),
             )
-            # Registra a tentativa antes de retornar
-            try:
-                db.table("relationship_executions").insert({
-                    "rule_id": rule["id"],
-                    "customer_id": client["id"],
-                    "scheduled_for": datetime.now(timezone.utc).isoformat(),
-                    "sent_at": None,
-                    "status": "falhou",
-                    "message_sent": personalized,
-                }).execute()
-            except Exception:
-                pass
-            return error_code  # sentinel para o chamador parar o loop
+            return error_code  # sinaliza para parar o loop
 
-    # Registrar execução
+    # Registra execução
     try:
         db.table("relationship_executions").insert({
             "rule_id": rule["id"],
             "customer_id": client["id"],
             "scheduled_for": datetime.now(timezone.utc).isoformat(),
-            "sent_at": datetime.now(timezone.utc).isoformat() if success else None,
-            "status": "concluido" if success else "falhou",
+            "sent_at": datetime.now(timezone.utc).isoformat() if result_ok else None,
+            "status": "concluido" if result_ok else "falhou",
             "message_sent": personalized if not DRY_RUN else f"[DRY_RUN] {personalized}",
         }).execute()
     except Exception as e:
-        logger.warning("Erro ao salvar execução para %s: %s", client.get("name"), e)
+        logger.warning("Erro ao registrar execução: %s", e)
 
-    return success
+    return result_ok
 
 
-async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
-    """Processa uma régua individual — coleta elegíveis e faz disparos."""
-    db = get_supabase()
-    logger.info("Processando regra: '%s' | Tipo: %s", rule["name"], rule["trigger_event"])
+# ─── Aniversariantes ──────────────────────────────────────────────────────────
 
-    today = date.today()
-    delay_days = int(rule.get("delay_days", 0) or 0)
-    eligible_clients: list[dict] = []
+async def process_birthday_rule(rule: dict, wp_config: dict, db) -> None:
+    """
+    Processa regra de Aniversário.
+    - Sem limite de envio (envia para TODOS que fazem aniversário hoje)
+    - Qualquer dia da semana
+    - Não reenvia para quem já recebeu hoje
+    """
+    today = datetime.now(BRT).date()
 
-    # ─── Coleta clientes elegíveis ────────────────────────────────────
-    if rule["trigger_event"] == "after_purchase":
-        # Clientes que compraram exatamente delay_days atrás
-        target_date = today - timedelta(days=delay_days)
-        try:
-            sales_res = (
-                db.table("sales_entries")
-                .select("client_id")
-                .gte("created_at", f"{target_date.isoformat()}T00:00:00")
-                .lt("created_at", f"{(target_date + timedelta(days=1)).isoformat()}T00:00:00")
-                .execute()
-            )
-            client_ids = list({s["client_id"] for s in (sales_res.data or [])})
-            if client_ids:
-                clients_res = db.table("clients").select("*").in_("id", client_ids).execute()
-                eligible_clients = clients_res.data or []
-        except Exception as e:
-            logger.warning("Erro ao buscar clientes after_purchase: %s", e)
-
-    elif rule["trigger_event"] == "no_purchase":
-        # Clientes que não compram há delay_days dias
-        cutoff = today - timedelta(days=delay_days)
-        cutoff_iso = f"{cutoff.isoformat()}T23:59:59"
-        try:
-            # Busca todas as vendas até o cutoff, agrupando por client_id
-            # Uma única query em vez de N+1
-            sales_res = (
-                db.table("sales_entries")
-                .select("client_id, created_at")
-                .order("created_at", desc=True)
-                .execute()
-            )
-            # Monta mapa: client_id → data da última compra
-            last_sale_map: dict[str, str] = {}
-            for sale in (sales_res.data or []):
-                cid = sale.get("client_id")
-                if cid and cid not in last_sale_map:
-                    last_sale_map[cid] = sale["created_at"]
-
-            # Filtra compradores cuja última compra foi antes do cutoff
-            buyer_res = (
-                db.table("opportunities")
-                .select("client_id")
-                .eq("stage", "comprador")
-                .execute()
-            )
-            buyer_ids = list({b["client_id"] for b in (buyer_res.data or [])})
-
-            stale_buyer_ids = []
-            for cid in buyer_ids:
-                last_date_str = last_sale_map.get(cid)
-                if not last_date_str:
-                    continue
-                try:
-                    last_sale_date = datetime.fromisoformat(
-                        last_date_str.split("T")[0]
-                    ).date()
-                    if last_sale_date <= cutoff:
-                        stale_buyer_ids.append(cid)
-                except (ValueError, TypeError):
-                    continue
-
-            # Busca clientes elegíveis em batch (máximo 1 query em vez de N)
-            if stale_buyer_ids:
-                clients_res = db.table("clients").select("*").in_("id", stale_buyer_ids).execute()
-                eligible_clients = clients_res.data or []
-        except Exception as e:
-            logger.warning("Erro ao buscar clientes no_purchase: %s", e)
-
-    elif rule["trigger_event"] == "birthday":
-        # Aniversários hoje (considera delay_days como antecipação)
-        bday_target = today + timedelta(days=delay_days)
-        try:
-            clients_res = (
-                db.table("clients")
-                .select("id, name, phone, email, origin, birth_date")
-                .not_.is_("birth_date", "null")
-                .not_.is_("phone", "null")
-                .limit(5000)
-                .execute()
-            )
-            for c in (clients_res.data or []):
-                bd_raw = c.get("birth_date")
-                if not bd_raw:
-                    continue
-                try:
-                    bd_date = datetime.fromisoformat(bd_raw.split("T")[0]).date()
-                    if bd_date.month == bday_target.month and bd_date.day == bday_target.day:
-                        eligible_clients.append(c)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.warning("Erro ao buscar aniversariantes: %s", e)
-
-    elif rule["trigger_event"] == "manual":
-        return
-
-    if not eligible_clients:
-        logger.info("Nenhum cliente elegível para regra '%s'", rule["name"])
-        return
-
-    logger.info("%d clientes elegíveis para regra '%s'", len(eligible_clients), rule["name"])
-
-    # Buscar/gerar variações
-    variations = await _get_or_generate_variations(rule, db, openai_client)
-    if len(variations) < MIN_VARIATIONS:
-        logger.warning(
-            "ABORTADO: regra '%s' tem apenas %d variações (mínimo %d anti-ban)",
-            rule["name"], len(variations), MIN_VARIATIONS,
+    # Busca todos os clientes com data de aniversário
+    try:
+        clients_res = (
+            db.table("clients")
+            .select("id, name, phone, birth_date")
+            .not_.is_("birth_date", "null")
+            .not_.is_("phone", "null")
+            .limit(5000)
+            .execute()
         )
+    except Exception as e:
+        logger.warning("Erro ao buscar clientes com aniversário: %s", e)
         return
 
-    if rule.get("channel", "whatsapp") != "whatsapp":
-        logger.info("Canal '%s' não suportado — apenas whatsapp", rule.get("channel"))
+    eligible = []
+    for c in (clients_res.data or []):
+        try:
+            bd = datetime.fromisoformat(c["birth_date"].split("T")[0]).date()
+            if bd.month == today.month and bd.day == today.day:
+                eligible.append(c)
+        except Exception:
+            pass
+
+    if not eligible:
+        logger.info("Nenhum aniversariante hoje — régua '%s'", rule["name"])
         return
 
-    # ─── Disparos ─────────────────────────────────────────────────────
-    random.shuffle(eligible_clients)
+    # Verifica quem já recebeu a mensagem hoje
+    today_start = f"{today.isoformat()}T00:00:00-03:00"
+    today_end   = f"{today.isoformat()}T23:59:59-03:00"
+    try:
+        sent_today_res = (
+            db.table("relationship_executions")
+            .select("customer_id")
+            .eq("rule_id", rule["id"])
+            .eq("status", "concluido")
+            .gte("sent_at", today_start)
+            .lte("sent_at", today_end)
+            .execute()
+        )
+        sent_ids = {r["customer_id"] for r in (sent_today_res.data or [])}
+    except Exception:
+        sent_ids = set()
+
+    pending = [c for c in eligible if c["id"] not in sent_ids]
+
+    if not pending:
+        logger.info("Todos os aniversariantes já receberam mensagem hoje — '%s'", rule["name"])
+        return
+
+    variations = _get_variations(db, rule)
+    if not variations:
+        logger.warning("Régua '%s': sem variações — gerando uma mensagem padrão de fallback", rule["name"])
+        # Fallback: usa message_template direto se disponível
+        tmpl = rule.get("message_template", "")
+        if tmpl:
+            variations = [tmpl]
+        else:
+            logger.error("Régua '%s': sem mensagem configurada — abortando", rule["name"])
+            return
+
+    logger.info("%d aniversariante(s) para enviar — régua '%s'", len(pending), rule["name"])
     sent = 0
-    failed = 0
-
-    for i, client in enumerate(eligible_clients):
-        if await _already_sent_today(db, rule["id"], client["id"]):
-            logger.info("Cliente %s já recebeu disparo hoje — pulando", client.get("name"))
-            continue
-
-        result = await _dispatch_to_client(rule, client, variations, wp_config, db)
-
-        if result == "rate_limit":
-            logger.warning("Rate limit UAZAPI — régua '%s' interrompida após %d envios", rule["name"], sent)
-            await alertar_dono(f"⚠️ Rate limit da UAZAPI atingido durante régua '{rule['name']}'. {sent} mensagens enviadas antes de parar.")
-            break
-        elif result == "auth_error":
-            logger.error("Token WhatsApp inválido — régua '%s' interrompida", rule["name"])
-            await alertar_dono("⚠️ Token WhatsApp inválido! Régua de relacionamento interrompida. Reconecte a instância no CRM.")
+    for i, client in enumerate(pending):
+        result = await _dispatch(rule, client, variations, wp_config, db)
+        if result in ("rate_limit", "auth_error"):
+            await alertar_dono(
+                f"⚠️ {result.upper()}: régua de aniversário '{rule['name']}' interrompida após {sent} envios."
+            )
             break
         elif result:
             sent += 1
-            logger.info("Enviado para %s", client.get("name"))
-        else:
-            failed += 1
-            logger.error("Falha ao enviar para %s", client.get("name"))
-
-        if i < len(eligible_clients) - 1:
-            delay = _random_delay()
-            logger.info("Aguardando %ds (anti-ban)...", delay)
+        if i < len(pending) - 1:
+            delay = random.randint(MIN_DELAY_SEC, MAX_DELAY_SEC)
             await asyncio.sleep(delay)
 
-    logger.info("Regra '%s' concluída | Sucesso: %d | Falhas: %d", rule["name"], sent, failed)
+    logger.info("Birthday rule '%s' | Enviados: %d", rule["name"], sent)
 
+
+# ─── Campanha para Compradores ────────────────────────────────────────────────
+
+async def process_buyers_rule(rule: dict, wp_config: dict, db) -> None:
+    """
+    Processa campanha para Compradores.
+    - Segunda a Sábado (sem domingo)
+    - Slot manhã (08h–12h): 20 mensagens distribuídas
+    - Slot tarde (13h–18h): 20 mensagens distribuídas
+    - Delay 60–180s entre envios (anti-ban)
+    - Rastreia quem já recebeu (não reenvia na mesma campanha)
+    - Desativa quando campanha encerra ou todos receberam
+    """
+    # 1. Verifica dia da semana
+    if not _is_weekday():
+        logger.info("Régua '%s': domingo — sem disparos", rule["name"])
+        return
+
+    # 2. Verifica slot
+    slot = _get_current_slot()
+    if not slot:
+        logger.info("Régua '%s': fora da janela (08–12h / 13–18h)", rule["name"])
+        return
+
+    # 3. Verifica datas da campanha
+    now_brt = datetime.now(BRT)
+    campaign_start = rule.get("campaign_start")
+    campaign_end   = rule.get("campaign_end")
+
+    if campaign_start:
+        try:
+            cs = datetime.fromisoformat(campaign_start.replace("Z", "+00:00"))
+            if now_brt < cs.astimezone(BRT):
+                logger.info("Régua '%s': campanha inicia em %s — aguardando", rule["name"], campaign_start[:10])
+                return
+        except Exception as e:
+            logger.warning("Erro ao parsear campaign_start: %s", e)
+
+    if campaign_end:
+        try:
+            ce = datetime.fromisoformat(campaign_end.replace("Z", "+00:00"))
+            if now_brt > ce.astimezone(BRT):
+                logger.info("Régua '%s': campanha encerrada em %s — desativando", rule["name"], campaign_end[:10])
+                try:
+                    db.table("relationship_rules").update({"active": False}).eq("id", rule["id"]).execute()
+                except Exception:
+                    pass
+                return
+        except Exception as e:
+            logger.warning("Erro ao parsear campaign_end: %s", e)
+
+    # 4. Verifica quota do slot
+    slot_quota = MORNING_QUOTA if slot == "morning" else AFTERNOON_QUOTA
+    already_sent = _count_slot_sends_today(db, rule["id"], slot)
+
+    if already_sent >= slot_quota:
+        logger.info(
+            "Régua '%s' | Slot %s: quota atingida (%d/%d)",
+            rule["name"], slot, already_sent, slot_quota,
+        )
+        return
+
+    # 5. Calcula batch desta execução
+    minutes_left = _minutes_until_slot_end(slot)
+    batch_size = _get_batch_size(slot_quota, already_sent, minutes_left)
+    if batch_size <= 0:
+        return
+
+    logger.info(
+        "Régua '%s' | Slot: %s | Enviados hoje: %d/%d | Batch: %d | Tempo restante: %dmin",
+        rule["name"], slot, already_sent, slot_quota, batch_size, minutes_left,
+    )
+
+    # 6. Busca compradores
+    try:
+        buyers_res = (
+            db.table("opportunities")
+            .select("client_id")
+            .eq("stage", "comprador")
+            .execute()
+        )
+        buyer_ids = list({b["client_id"] for b in (buyers_res.data or [])})
+    except Exception as e:
+        logger.warning("Erro ao buscar compradores: %s", e)
+        return
+
+    if not buyer_ids:
+        logger.info("Nenhum comprador encontrado no CRM")
+        return
+
+    try:
+        clients_res = (
+            db.table("clients")
+            .select("id, name, phone")
+            .in_("id", buyer_ids)
+            .not_.is_("phone", "null")
+            .execute()
+        )
+        all_buyers = clients_res.data or []
+    except Exception as e:
+        logger.warning("Erro ao buscar dados dos compradores: %s", e)
+        return
+
+    # 7. Filtra quem ainda não recebeu esta campanha
+    pending = _get_pending_clients(db, rule["id"], all_buyers)
+
+    if not pending:
+        logger.info(
+            "Régua '%s': todos os compradores já receberam a campanha — desativando",
+            rule["name"],
+        )
+        try:
+            db.table("relationship_rules").update({"active": False}).eq("id", rule["id"]).execute()
+        except Exception:
+            pass
+        return
+
+    logger.info(
+        "Régua '%s': %d compradores pendentes (total: %d)",
+        rule["name"], len(pending), len(all_buyers),
+    )
+
+    # 8. Busca variações
+    variations = _get_variations(db, rule)
+    if len(variations) < MIN_VARIATIONS:
+        logger.warning(
+            "ABORTADO: régua '%s' tem apenas %d/%d variações — mínimo anti-ban não atingido. "
+            "Edite a régua e gere pelo menos %d variações com o Jarvis.",
+            rule["name"], len(variations), MIN_VARIATIONS, MIN_VARIATIONS,
+        )
+        await alertar_dono(
+            f"⚠️ Campanha '{rule['name']}' abortada: apenas {len(variations)}/{MIN_VARIATIONS} variações. "
+            f"Edite a régua e gere {MIN_VARIATIONS} variações com o Jarvis."
+        )
+        return
+
+    # 9. Dispara batch (ordem aleatória, delays entre mensagens)
+    random.shuffle(pending)
+    batch = pending[:batch_size]
+    sent = 0
+
+    for i, client in enumerate(batch):
+        result = await _dispatch(rule, client, variations, wp_config, db)
+
+        if result in ("rate_limit", "auth_error"):
+            await alertar_dono(
+                f"⚠️ {str(result).upper()}: régua '{rule['name']}' interrompida após {sent} envios no slot {slot}."
+            )
+            break
+        elif result:
+            sent += 1
+            logger.info("[%d/%d] Enviado para %s", sent, batch_size, client.get("name"))
+        else:
+            logger.warning("Falha ao enviar para %s", client.get("name"))
+
+        if i < len(batch) - 1:
+            delay = random.randint(MIN_DELAY_SEC, MAX_DELAY_SEC)
+            logger.info("Anti-ban: aguardando %ds...", delay)
+            await asyncio.sleep(delay)
+
+    logger.info(
+        "Régua '%s' | Slot %s | Enviados: %d/%d",
+        rule["name"], slot, sent, batch_size,
+    )
+
+
+# ─── Job de pré-verificação (06h) ─────────────────────────────────────────────
+
+async def job_ensure_variations() -> None:
+    """
+    Roda às 06h: verifica se todas as réguas ativas têm variações suficientes.
+    Alerta o dono via WhatsApp se alguma régua estiver com poucas variações.
+    """
+    logger.info("job_ensure_variations: verificando réguas ativas")
+    db = get_supabase()
+    rules_res = db.table("relationship_rules").select("id, name, active").eq("active", True).execute()
+
+    for rule in (rules_res.data or []):
+        try:
+            count_res = (
+                db.table("relationship_message_variations")
+                .select("id", count="exact")
+                .eq("rule_id", rule["id"])
+                .execute()
+            )
+            count = count_res.count or 0
+            if count < MIN_VARIATIONS:
+                logger.warning("Régua '%s': %d/%d variações", rule["name"], count, MIN_VARIATIONS)
+                await alertar_dono(
+                    f"⚠️ Régua de Relacionamento '{rule['name']}' tem apenas {count}/{MIN_VARIATIONS} variações. "
+                    f"Edite a régua e gere as variações com o Jarvis para evitar bloqueio do WhatsApp."
+                )
+            else:
+                logger.info("Régua '%s': %d variações ✓", rule["name"], count)
+        except Exception as e:
+            logger.error("Erro ao verificar variações da régua '%s': %s", rule.get("name"), e)
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 async def main() -> None:
     """Ponto de entrada — processa todas as réguas ativas."""
     async with registrar_automacao("cron_regua_relacionamento"):
-        # ─── Verificação de janela horária ──────────────────────────────────
-        # Disparos só entre 08h e 18h (horário Brasília).
-        # O job roda a cada 30 min, mas fora da janela retorna sem fazer nada.
-        if not _is_within_window():
-            logger.info(
-                "Régua de relacionamento: fora da janela 08h–18h BRT (%dh) — aguardando",
-                datetime.now(BRT).hour,
-            )
-            return
-
         logger.info("Iniciando Cron de Réguas de Relacionamento | DRY_RUN=%s", DRY_RUN)
-
         db = get_supabase()
-        s = get_settings()
-        openai_client = AsyncOpenAI(api_key=s.openai_api_key)
 
+        # WhatsApp conectado?
         wp_res = (
             db.table("whatsapp_instances")
             .select("*")
@@ -475,11 +526,11 @@ async def main() -> None:
             .execute()
         )
         if not wp_res.data:
-            logger.warning("Sem instância WhatsApp conectada — régua abortada")
+            logger.warning("Sem instância WhatsApp conectada — cron abortado")
             return
-
         wp_config = wp_res.data[0]
 
+        # Busca réguas ativas
         rules_res = db.table("relationship_rules").select("*").eq("active", True).execute()
         active_rules = rules_res.data or []
 
@@ -487,14 +538,26 @@ async def main() -> None:
             logger.info("Nenhuma régua ativa")
             return
 
-        logger.info("%d réguas ativas encontradas", len(active_rules))
+        logger.info("%d régua(s) ativa(s)", len(active_rules))
+
         for rule in active_rules:
             try:
-                await process_rule(rule, wp_config, openai_client)
+                trigger = rule.get("trigger_event", "")
+
+                if trigger == "birthday":
+                    await process_birthday_rule(rule, wp_config, db)
+
+                elif trigger in ("no_purchase", "buyers"):
+                    await process_buyers_rule(rule, wp_config, db)
+
+                else:
+                    logger.info("Tipo de gatilho '%s' não processado nesta versão", trigger)
+
             except Exception as e:
-                logger.error("Erro na regra '%s': %s", rule.get("name"), e)
-                await alertar_dono(f"Erro na régua '{rule.get('name')}': {e}")
+                logger.error("Erro na régua '%s': %s", rule.get("name"), e)
+                await alertar_dono(f"Erro na régua '{rule.get('name')}': {str(e)[:300]}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import asyncio as _asyncio
+    _asyncio.run(main())
