@@ -183,21 +183,24 @@ Etapa atual: {current_stage}"""
             "ai_suggested_stage": suggested_stage,
         }).eq("id", opportunity_id).execute()
 
-        # Log da automação
+        # Log da automação — usa o schema correto da tabela automacoes_log
+        # (campos: nome, status, detalhes, iniciado_em, finalizado_em, dry_run)
         try:
+            _now = datetime.now(timezone.utc).isoformat()
             db.table("automacoes_log").insert({
-                "automation_name": "whatsapp_watcher",
-                "status": "sucesso",
-                "context": json.dumps({
+                "nome": "whatsapp_watcher",
+                "status": "concluido",
+                "detalhes": {
                     "client_id": client_id,
                     "opportunity_id": opportunity_id,
                     "from_stage": current_stage,
                     "to_stage": suggested_stage,
                     "confidence": confidence,
                     "reason": reason,
-                }),
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "ended_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "iniciado_em": _now,
+                "finalizado_em": _now,
+                "dry_run": False,
             }).execute()
         except Exception as log_err:
             logger.warning("Watcher: erro ao salvar log (não crítico): %s", log_err)

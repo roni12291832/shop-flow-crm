@@ -179,13 +179,11 @@ async def receive_whatsapp_message(request: Request):
                         return {"status": "deleted", "type": "chat", "phone": phone}
             
             elif "MESSAGE" in event:
-                # Exclusão de mensagem única
+                # Exclusão de mensagem única — busca pelo provider_message_id (campo correto)
                 msg_id = msg_data_dict.get("id") or msg_data_dict.get("messageid")
                 if msg_id:
-                    db.table("messages").delete().eq("id", msg_id).execute()
-                    # Fallback para IDs do CRM
-                    db.table("messages").delete().eq("id", f"crm-{msg_id}").execute()
-                    logger.info(f"Sync: Mensagem {msg_id} apagada via webhook")
+                    db.table("messages").delete().eq("provider_message_id", msg_id).execute()
+                    logger.info(f"Sync: Mensagem {msg_id} apagada via webhook (provider_message_id)")
                     return {"status": "deleted", "type": "message", "id": msg_id}
             
             return {"status": "ignored", "reason": "evento de delete sem dados suficientes"}
@@ -289,13 +287,11 @@ async def receive_whatsapp_message(request: Request):
             is_new = True
             logger.info("Novo cliente criado: %s (%s)", push_name, phone)
 
-        # Cancela follow-ups pendentes — cliente respondeu
-        try:
-            await cancel_pending_for_client(client_id, reason="cliente_respondeu")
-        except Exception as e:
-            logger.warning("Erro ao cancelar follow-ups (não crítico): %s", e)
-
         # ─── 2. Gerencia Conversa ─────────────────────────────────────────
+        # NOTA: o cancelamento de follow-ups foi movido para DEPOIS de salvar
+        # a mensagem. Motivo: se o webhook for duplicado e a mensagem for
+        # descartada pela deduplicação (UNIQUE constraint), os follow-ups
+        # NÃO devem ser cancelados — seriam cancelados indevidamente.
         conv_res = (
             db.table("conversations")
             .select("*")
@@ -356,6 +352,15 @@ async def receive_whatsapp_message(request: Request):
                     "provider_message_id": provider_message_id,
                 }).execute()
                 logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
+
+                # Cancela follow-ups SOMENTE após a mensagem ser salva com sucesso.
+                # Se o INSERT acima tivesse sido deduplicado (webhook duplicado),
+                # já teríamos retornado antes — garantindo que não cancelamos
+                # follow-ups por engano.
+                try:
+                    await cancel_pending_for_client(client_id, reason="cliente_respondeu")
+                except Exception as _ce:
+                    logger.warning("Erro ao cancelar follow-ups (não crítico): %s", _ce)
             except Exception as e:
                 err_str = str(e).lower()
                 # ─── Detecção de UNIQUE violation ───────────────────────────────

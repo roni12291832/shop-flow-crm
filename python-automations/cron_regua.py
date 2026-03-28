@@ -7,6 +7,7 @@ Roda via APScheduler (main.py) — a cada 30 minutos.
 """
 import asyncio
 import json
+import re
 import random
 from datetime import datetime, timedelta, date, timezone
 
@@ -17,6 +18,44 @@ from uazapi_client import uazapi
 from config import get_settings
 
 MIN_VARIATIONS = 15  # Anti-ban WhatsApp
+
+# Janela de disparo: 08h–18h Brasília (UTC-3 fixo — SP não usa mais horário de verão)
+BRT = timezone(timedelta(hours=-3))
+WINDOW_START = 8
+WINDOW_END   = 18
+
+
+def _is_within_window() -> bool:
+    """Retorna True se estiver dentro da janela de disparo (08h-18h BRT)."""
+    return WINDOW_START <= datetime.now(BRT).hour < WINDOW_END
+
+
+def _parse_gpt_json(content: str) -> dict:
+    """
+    Extrai JSON da resposta do GPT de forma robusta.
+    Lida com: JSON puro, JSON em bloco ```json```, JSON embutido em texto.
+    """
+    content = content.strip()
+    # Nível 1: parse direto
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    # Nível 2: extrai bloco ```json ... ``` ou ``` ... ```
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+    # Nível 3: encontra qualquer { ... } no texto
+    match = re.search(r"\{[^{}]+\}", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"Nenhum JSON válido encontrado em: {content[:120]}")
 
 
 def _random_delay() -> int:
@@ -50,7 +89,11 @@ Mensagem base: {base}"""
             max_tokens=2500,
         )
         content = resp.choices[0].message.content or ""
-        result = json.loads(content.strip())
+        try:
+            result = _parse_gpt_json(content)
+        except ValueError as parse_err:
+            logger.warning("Erro ao parsear JSON de variações para '%s': %s", rule["name"], parse_err)
+            return []
         generated = result.get("variations", [])
 
         if len(generated) >= MIN_VARIATIONS:
@@ -177,8 +220,15 @@ async def _dispatch_to_client(
     variations: list[str],
     wp_config: dict,
     db,
-) -> bool:
-    """Envia uma variação aleatória de mensagem para o cliente."""
+) -> bool | str:
+    """
+    Envia uma variação aleatória de mensagem para o cliente.
+
+    Retorna:
+      True        — enviado com sucesso
+      False       — erro genérico (continua o loop)
+      "rate_limit" — rate limit da UAZAPI (deve parar o loop imediatamente)
+    """
     phone = client.get("phone", "")
     if not phone:
         return False
@@ -189,6 +239,7 @@ async def _dispatch_to_client(
     if DRY_RUN:
         logger.info("[DRY_RUN] Enviaria para %s: %.60s...", client.get("name"), personalized)
         success = True
+        error_code = None
     else:
         resp = await uazapi.send_text(
             api_url=wp_config["api_url"],
@@ -198,7 +249,28 @@ async def _dispatch_to_client(
             message=personalized,
             instance_token=wp_config.get("instance_token"),
         )
+        error_code = resp.get("error_code") if "error" in resp else None
         success = "error" not in resp
+
+        # Rate limit ou auth error — sinaliza para parar o loop
+        if error_code in ("rate_limit", "auth_error"):
+            logger.warning(
+                "Régua '%s': %s — interrompendo disparos para %s",
+                rule["name"], error_code, client.get("name"),
+            )
+            # Registra a tentativa antes de retornar
+            try:
+                db.table("relationship_executions").insert({
+                    "rule_id": rule["id"],
+                    "customer_id": client["id"],
+                    "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                    "sent_at": None,
+                    "status": "falhou",
+                    "message_sent": personalized,
+                }).execute()
+            except Exception:
+                pass
+            return error_code  # sentinel para o chamador parar o loop
 
     # Registrar execução
     try:
@@ -351,8 +423,17 @@ async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
             logger.info("Cliente %s já recebeu disparo hoje — pulando", client.get("name"))
             continue
 
-        success = await _dispatch_to_client(rule, client, variations, wp_config, db)
-        if success:
+        result = await _dispatch_to_client(rule, client, variations, wp_config, db)
+
+        if result == "rate_limit":
+            logger.warning("Rate limit UAZAPI — régua '%s' interrompida após %d envios", rule["name"], sent)
+            await alertar_dono(f"⚠️ Rate limit da UAZAPI atingido durante régua '{rule['name']}'. {sent} mensagens enviadas antes de parar.")
+            break
+        elif result == "auth_error":
+            logger.error("Token WhatsApp inválido — régua '%s' interrompida", rule["name"])
+            await alertar_dono("⚠️ Token WhatsApp inválido! Régua de relacionamento interrompida. Reconecte a instância no CRM.")
+            break
+        elif result:
             sent += 1
             logger.info("Enviado para %s", client.get("name"))
         else:
@@ -370,6 +451,16 @@ async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
 async def main() -> None:
     """Ponto de entrada — processa todas as réguas ativas."""
     async with registrar_automacao("cron_regua_relacionamento"):
+        # ─── Verificação de janela horária ──────────────────────────────────
+        # Disparos só entre 08h e 18h (horário Brasília).
+        # O job roda a cada 30 min, mas fora da janela retorna sem fazer nada.
+        if not _is_within_window():
+            logger.info(
+                "Régua de relacionamento: fora da janela 08h–18h BRT (%dh) — aguardando",
+                datetime.now(BRT).hour,
+            )
+            return
+
         logger.info("Iniciando Cron de Réguas de Relacionamento | DRY_RUN=%s", DRY_RUN)
 
         db = get_supabase()

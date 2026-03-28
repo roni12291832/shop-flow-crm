@@ -176,14 +176,20 @@ async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
             }
         )
 
-    # Ordena por timestamp (suporta int e string ISO)
-    def _sort_ts(x):
+    # Ordena por timestamp — converte tudo para float (Unix epoch) para evitar
+    # TypeError ao comparar int com str em Python 3.
+    def _sort_ts(x) -> float:
         ts = x.get("last_message_at")
         if ts is None:
-            return 0
+            return 0.0
         if isinstance(ts, (int, float)):
-            return ts
-        return str(ts)  # ISO string ordena lexicograficamente
+            return float(ts)
+        # ISO string → converte para Unix timestamp para comparação uniforme
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            return 0.0
 
     enriched.sort(key=_sort_ts, reverse=True)
     return {"conversations": enriched, "total": len(enriched)}
@@ -256,13 +262,18 @@ async def get_conversation_messages(
     # 3. Mescla e ordena por timestamp
     all_messages = [{**m, "source": "whatsapp"} for m in wa_messages] + crm_messages
 
-    def _sort_key(m):
+    def _sort_key(m) -> float:
         ts = m.get("timestamp")
         if ts is None:
-            return 0
+            return 0.0
         if isinstance(ts, (int, float)):
-            return ts
-        return str(ts)
+            return float(ts)
+        # ISO string → converte para Unix timestamp para comparação uniforme
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            return 0.0
 
     all_messages.sort(key=_sort_key)
 

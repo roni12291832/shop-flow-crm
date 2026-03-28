@@ -124,10 +124,18 @@ async def set_step_messages(step_id: str, messages: list[str]):
             detail=f"Mínimo de {step['min_variations']} variações para etapa '{step['stage']}' step {step['step_number']}. Você enviou {len(messages)}."
         )
 
-    # Apaga antigas e insere novas
-    db.table("stage_followup_messages").delete().eq("step_id", step_id).execute()
     rows = [{"step_id": step_id, "variation_number": i + 1, "message": msg.strip()} for i, msg in enumerate(messages) if msg.strip()]
-    db.table("stage_followup_messages").insert(rows).execute()
+
+    # Segurança: insere PRIMEIRO as novas, só depois apaga as antigas.
+    # Se o INSERT falhar, as variações antigas permanecem intactas —
+    # nunca ficamos com 0 variações para um step ativo.
+    insert_res = db.table("stage_followup_messages").insert(rows).execute()
+    if insert_res.data:
+        new_ids = [r["id"] for r in insert_res.data]
+        db.table("stage_followup_messages").delete().eq("step_id", step_id).not_.in_("id", new_ids).execute()
+    else:
+        logger.warning("Insert de variações retornou vazio para step %s — variações antigas mantidas", step_id)
+        raise HTTPException(status_code=500, detail="Falha ao salvar variações no banco.")
 
     return {"status": "ok", "saved": len(rows)}
 

@@ -334,7 +334,7 @@ async def _auto_move_expired(db) -> int:
                     "stage": step["auto_move_to"],
                 }).eq("id", opp_id).execute()
                 db.table("stage_followup_logs").insert({
-                    "client_id": opp_res.data[0]["client_id"],
+                    "client_id": client_id,
                     "opportunity_id": opp_id,
                     "step_id": step["id"],
                     "stage": step["stage"],
@@ -343,6 +343,23 @@ async def _auto_move_expired(db) -> int:
                 }).execute()
                 logger.info("Opp %s auto-movida de '%s' para '%s'", opp_id, step["stage"], step["auto_move_to"])
                 moved += 1
+
+                # Dispara on_stage_change para a nova etapa:
+                # - Cancela qualquer follow-up restante da etapa anterior
+                # - Cria follow-ups para a nova etapa (ex: "perdido" não cria nenhum,
+                #   mas uma etapa ativa como "interessado" criaria os steps corretos)
+                try:
+                    await on_stage_change(
+                        client_id=str(client_id),
+                        opportunity_id=str(opp_id),
+                        new_stage=step["auto_move_to"],
+                        old_stage=step["stage"],
+                    )
+                except Exception as _fe:
+                    logger.warning(
+                        "Erro ao acionar on_stage_change após auto_move de '%s' → '%s' (não crítico): %s",
+                        step["stage"], step["auto_move_to"], _fe,
+                    )
 
     return moved
 

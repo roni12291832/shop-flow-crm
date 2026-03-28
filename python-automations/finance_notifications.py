@@ -33,11 +33,13 @@ async def job_finance_notifications():
         try:
             due_soon_res = (
                 db.table("lancamentos")
-                .select("*")
+                .select("description, categoria, value, amount, due_date")
                 .eq("type", "saida")
                 .eq("status", "pendente")
                 .lte("due_date", in_3_days.isoformat())
                 .gte("due_date", today.isoformat())
+                .order("due_date")
+                .limit(100)
                 .execute()
             )
             due_soon = due_soon_res.data or []
@@ -49,10 +51,12 @@ async def job_finance_notifications():
         try:
             overdue_res = (
                 db.table("lancamentos")
-                .select("*")
+                .select("description, categoria, value, amount, due_date")
                 .eq("type", "saida")
                 .eq("status", "pendente")
                 .lt("due_date", today.isoformat())
+                .order("due_date", desc=True)
+                .limit(100)
                 .execute()
             )
             overdue = overdue_res.data or []
