@@ -57,22 +57,31 @@ def _parse_gpt_json(content: str) -> dict:
 
 
 SYSTEM_PROMPT = """Você é um analisador de intenção de leads para uma loja de roupas.
-Com base na mensagem recebida e no histórico da conversa, retorne SOMENTE um JSON:
+Com base na mensagem recebida e no histórico da conversa, classifique o estágio atual do lead.
+
+IMPORTANTE: você só é chamado para leads que já estão em "contato_iniciado" ou "interessado".
+O estágio "lead_novo" já foi tratado pelo sistema antes de chamar você.
+
+Retorne SOMENTE um JSON (sem texto adicional, sem markdown):
 
 {
-  "stage": "lead_novo|contato_iniciado|interessado|comprador|perdido",
+  "stage": "contato_iniciado|interessado|comprador|perdido",
   "confidence": 0.0-1.0,
-  "reason": "explicação curta"
+  "reason": "explicação curta em português"
 }
 
-Regras:
-- "lead_novo": primeira mensagem genérica, sem contexto de compra, apenas cumprimento
-- "contato_iniciado": respondeu à abordagem mas sem interesse claro em produto específico
-- "interessado": perguntou sobre produto específico, tamanho, cor, preço, estoque, prazo de entrega
-- "comprador": confirmou compra, pediu pix/link de pagamento, informou endereço de entrega, agradeceu pela compra
-- "perdido": disse que não quer, achou caro, desistiu explicitamente, bloqueou ou foi grosseiro
+Classificação dos estágios:
+- "contato_iniciado": conversando de forma genérica, sem perguntar sobre produto específico (ex: "oi", "tudo bem?", "ainda tem promoção?", "como funciona o site?")
+- "interessado": perguntou sobre produto específico — tamanho, cor, preço, estoque, foto, medidas, prazo de entrega, formas de pagamento de um produto (ex: "tem a calça X no 40?", "quanto custa o vestido?", "tem em outras cores?")
+- "comprador": confirmou que quer comprar, pediu PIX/link de pagamento, informou endereço de entrega, enviou comprovante, agradeceu pela compra (ex: "vou levar", "me passa o PIX", "meu endereço é...", "obrigada pela compra")
+- "perdido": explicitamente desistiu, achou caro sem continuidade, disse que não quer mais, bloqueou ou foi grosseiro (ex: "não tenho interesse", "muito caro, obrigado", "não quero mais")
 
-Responda APENAS com o JSON, sem texto adicional, sem markdown."""
+Dicas:
+- Confidence >= 0.85 apenas quando tiver CERTEZA pelo contexto completo
+- Confidence entre 0.7-0.84 quando a intenção é clara mas poderia ter outra interpretação
+- Confidence < 0.7 quando ambíguo (o sistema não moverá o lead nesses casos)
+- Prefira avançar o lead se a mensagem tiver qualquer sinal de interesse em produto específico
+- "perdido" deve ser usado com parcimônia — apenas quando explícito e definitivo"""
 
 
 async def analyze_and_move_lead(

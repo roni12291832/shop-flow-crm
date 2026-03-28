@@ -89,6 +89,56 @@ def _extract_message_text(msg_obj: dict, message_data: dict) -> tuple[str, str]:
 # PIPELINE_STAGES importado de stages.py (fonte única de verdade)
 
 
+@router.get("/debug/pipeline")
+async def debug_pipeline():
+    """
+    Diagnóstico: mostra os últimos leads criados/movidos pelo webhook.
+    Útil para verificar se novos contatos estão sendo registrados no CRM.
+    """
+    db = get_supabase()
+    from datetime import timedelta
+    from datetime import datetime as dt
+    since = (dt.now(timezone.utc) - timedelta(hours=48)).isoformat()
+
+    # Oportunidades criadas nas últimas 48h
+    opps = (
+        db.table("opportunities")
+        .select("id, title, stage, created_at, client_id")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(20)
+        .execute()
+    )
+
+    # Logs do watcher agent
+    watcher_logs = (
+        db.table("automacoes_log")
+        .select("detalhes, iniciado_em, status")
+        .eq("nome", "whatsapp_watcher")
+        .gte("iniciado_em", since)
+        .order("iniciado_em", desc=True)
+        .limit(20)
+        .execute()
+    )
+
+    # System errors
+    errors = (
+        db.table("system_logs")
+        .select("message, created_at")
+        .eq("level", "ERROR")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+
+    return {
+        "recent_opportunities_48h": opps.data or [],
+        "watcher_moves_48h": watcher_logs.data or [],
+        "recent_errors": errors.data or [],
+    }
+
+
 @router.post("/setup")
 async def setup_webhook_now(request: Request):
     """
@@ -261,12 +311,31 @@ async def receive_whatsapp_message(request: Request):
                 return {"status": "ignored", "reason": "mensagem já processada"}
 
         # ─── 1. Busca ou cria Cliente ─────────────────────────────────────
-        client_res = db.table("clients").select("*").eq("phone", phone).limit(1).execute()
+        # Normaliza número para busca: tenta com e sem DDI 55 (Brasil)
+        # Ex: "5511999999999" → também testa "11999999999"
+        # Ex: "11999999999"  → também testa "5511999999999"
+        phone_variants: list[str] = [phone]
+        if phone.startswith("55") and len(phone) >= 12:
+            phone_variants.append(phone[2:])          # remove DDI
+        elif len(phone) <= 11:
+            phone_variants.append("55" + phone)       # adiciona DDI
+        # Também tenta sem o 9 extra (celular 8 dígitos antigo)
+        if len(phone) == 13 and phone.startswith("55"):
+            phone_variants.append(phone[:4] + phone[5:])  # remove 9 extra
 
-        if client_res.data:
-            client = client_res.data[0]
+        client: dict | None = None
+        for ph_variant in phone_variants:
+            res = db.table("clients").select("*").eq("phone", ph_variant).limit(1).execute()
+            if res.data:
+                client = res.data[0]
+                break
+
+        if client:
             client_id = client["id"]
             is_new = False
+            # Atualiza nome se estava genérico e agora temos pushName real
+            if push_name and client.get("name", "").startswith("WhatsApp "):
+                db.table("clients").update({"name": push_name}).eq("id", client_id).execute()
         else:
             if DRY_RUN:
                 logger.info("[DRY_RUN] Criaria cliente %s (%s)", push_name, phone)
@@ -279,13 +348,25 @@ async def receive_whatsapp_message(request: Request):
             }
             insert_res = db.table("clients").insert(new_client).execute()
             if not insert_res.data:
-                logger.error("Erro ao criar cliente: %s", insert_res)
-                return {"status": "error", "message": "falha ao criar cliente"}
-
-            client = insert_res.data[0]
-            client_id = client["id"]
-            is_new = True
-            logger.info("Novo cliente criado: %s (%s)", push_name, phone)
+                # Pode ter falhado por UNIQUE violation se outro webhook criou ao mesmo tempo
+                # Tenta buscar o cliente que acabou de ser inserido por request concorrente
+                logger.warning("INSERT de cliente falhou para %s — buscando registro concorrente", phone)
+                for ph_variant in phone_variants:
+                    retry_res = db.table("clients").select("*").eq("phone", ph_variant).limit(1).execute()
+                    if retry_res.data:
+                        client = retry_res.data[0]
+                        break
+                if not client:
+                    logger.error("Erro ao criar cliente e não encontrado no banco: %s (%s)", push_name, phone)
+                    return {"status": "error", "message": "falha ao criar cliente"}
+                client_id = client["id"]
+                is_new = False
+                logger.info("Cliente encontrado após falha de INSERT (concorrência): %s (%s)", push_name, phone)
+            else:
+                client = insert_res.data[0]
+                client_id = client["id"]
+                is_new = True
+                logger.info("Novo cliente criado: %s (%s)", push_name, phone)
 
         # ─── 2. Gerencia Conversa ─────────────────────────────────────────
         # NOTA: o cancelamento de follow-ups foi movido para DEPOIS de salvar
@@ -433,51 +514,80 @@ async def receive_whatsapp_message(request: Request):
                         logger.error("Falha ao criar oportunidade para %s: %s", push_name, ins)
 
                 elif existing_opp["stage"] not in ("comprador", "perdido", "desqualificado"):
-                    # Oportunidade em etapa ativa → analisa mensagem com Watcher Agent (IA avançada)
+                    # Oportunidade em etapa ativa → analisa mensagem
                     old_stage = existing_opp["stage"]
                     opportunity_action = f"existing_{old_stage}"
-                    try:
-                        # Busca histórico de mensagens do cliente para contexto
-                        hist_res = (
-                            db.table("messages")
-                            .select("content, is_from_client")
-                            .eq("client_id", client_id)
-                            .order("created_at", desc=True)
-                            .limit(10)
-                            .execute()
-                        )
-                        history = list(reversed(hist_res.data or []))
 
-                        watcher_result = await watcher_analyze(
-                            client_id=str(client_id),
-                            opportunity_id=str(existing_opp["id"]),
-                            current_stage=old_stage,
-                            new_message=message_text,
-                            message_history=history,
-                            db=db,
-                        )
-
-                        if watcher_result.get("moved"):
-                            new_stage = watcher_result["new_stage"]
-                            opportunity_action = f"advanced_to_{new_stage}"
+                    # ─── Regra Determinística: lead_novo → contato_iniciado ────────
+                    # Se o lead está em lead_novo e QUALQUER mensagem chega, ele já
+                    # é contato_iniciado — não precisa de IA para isso.
+                    # A IA só é usada para avanços mais significativos (→ interessado, → comprador).
+                    if old_stage == "lead_novo":
+                        try:
+                            db.table("opportunities").update({
+                                "stage": "contato_iniciado",
+                            }).eq("id", existing_opp["id"]).execute()
+                            opportunity_action = "advanced_to_contato_iniciado"
                             logger.info(
-                                "Watcher moveu %s de '%s' → '%s': %s",
-                                push_name, old_stage, new_stage, watcher_result.get("reason"),
+                                "lead_novo → contato_iniciado (regra determinística): %s (%s)",
+                                push_name, phone,
                             )
                             try:
                                 await on_stage_change(
                                     client_id=str(client_id),
                                     opportunity_id=str(existing_opp["id"]),
-                                    new_stage=new_stage,
-                                    old_stage=old_stage,
+                                    new_stage="contato_iniciado",
+                                    old_stage="lead_novo",
                                 )
                             except Exception as fe:
-                                logger.warning("Erro ao acionar follow-up após watcher (não crítico): %s", fe)
-                        else:
-                            opportunity_action = f"existing_{old_stage}_no_change"
-                    except Exception as e:
-                        logger.warning("Watcher Agent falhou (não crítico): %s", e)
-                        opportunity_action = f"existing_{old_stage}_watcher_error"
+                                logger.warning("Erro ao acionar follow-up de contato_iniciado (não crítico): %s", fe)
+                        except Exception as e:
+                            logger.warning("Erro ao mover lead_novo → contato_iniciado: %s", e)
+
+                    else:
+                        # Para contato_iniciado e interessado → usa IA (Watcher Agent)
+                        try:
+                            # Busca histórico de mensagens do cliente para contexto
+                            hist_res = (
+                                db.table("messages")
+                                .select("content, is_from_client")
+                                .eq("client_id", client_id)
+                                .order("created_at", desc=True)
+                                .limit(10)
+                                .execute()
+                            )
+                            history = list(reversed(hist_res.data or []))
+
+                            watcher_result = await watcher_analyze(
+                                client_id=str(client_id),
+                                opportunity_id=str(existing_opp["id"]),
+                                current_stage=old_stage,
+                                new_message=message_text,
+                                message_history=history,
+                                db=db,
+                            )
+
+                            if watcher_result.get("moved"):
+                                new_stage = watcher_result["new_stage"]
+                                opportunity_action = f"advanced_to_{new_stage}"
+                                logger.info(
+                                    "Watcher moveu %s de '%s' → '%s': %s",
+                                    push_name, old_stage, new_stage, watcher_result.get("reason"),
+                                )
+                                try:
+                                    await on_stage_change(
+                                        client_id=str(client_id),
+                                        opportunity_id=str(existing_opp["id"]),
+                                        new_stage=new_stage,
+                                        old_stage=old_stage,
+                                    )
+                                except Exception as fe:
+                                    logger.warning("Erro ao acionar follow-up após watcher (não crítico): %s", fe)
+                            else:
+                                opportunity_action = f"existing_{old_stage}_no_change"
+                        except Exception as e:
+                            logger.warning("Watcher Agent falhou (não crítico): %s", e)
+                            opportunity_action = f"existing_{old_stage}_watcher_error"
 
                 else:
                     opportunity_action = f"existing_{existing_opp['stage']}_no_change"

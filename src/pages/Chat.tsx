@@ -1346,8 +1346,8 @@ export default function Chat() {
         {/* Header */}
         <div className="px-4 py-2.5 border-b border-border bg-card flex justify-between items-center shrink-0">
           <div className="flex items-center gap-3">
-            {/* Botão voltar — só aparece em mobile (md:hidden) via CSS, sem depender de estado JS */}
-            <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={() => setActiveChatId(null)}>
+            {/* Botão voltar — só aparece em mobile (sm:hidden) via CSS, sem depender de estado JS */}
+            <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden" onClick={() => setActiveChatId(null)}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div
@@ -1603,8 +1603,8 @@ export default function Chat() {
       <div className={`
         border-r border-border flex flex-col shrink-0
         ${activeChatId
-          ? "hidden md:flex md:w-[300px]"   // mobile: esconde quando chat aberto
-          : "flex w-full md:w-[300px]"      // mobile: mostra quando nenhum chat
+          ? "hidden sm:flex sm:w-[300px]"   // mobile: esconde quando chat aberto
+          : "flex w-full sm:w-[300px]"      // mobile: mostra quando nenhum chat
         }
       `}>
         {renderSidebar()}
@@ -1613,7 +1613,7 @@ export default function Chat() {
       {/* Mensagens — sempre visível em desktop; no mobile oculta quando sem chat */}
       <div className={`
         flex-1 flex min-w-0 relative
-        ${activeChatId ? "flex" : "hidden md:flex"}
+        ${activeChatId ? "flex" : "hidden sm:flex"}
       `}>
         {renderMessages()}
         <div className="hidden lg:block">
