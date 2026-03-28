@@ -130,12 +130,35 @@ async def set_step_messages(step_id: str, messages: list[str]):
     # Se o INSERT falhar, as variações antigas permanecem intactas —
     # nunca ficamos com 0 variações para um step ativo.
     insert_res = db.table("stage_followup_messages").insert(rows).execute()
-    if insert_res.data:
-        new_ids = [r["id"] for r in insert_res.data]
-        db.table("stage_followup_messages").delete().eq("step_id", step_id).not_.in_("id", new_ids).execute()
-    else:
+    if not insert_res.data:
         logger.warning("Insert de variações retornou vazio para step %s — variações antigas mantidas", step_id)
         raise HTTPException(status_code=500, detail="Falha ao salvar variações no banco.")
+
+    new_ids = [r["id"] for r in insert_res.data]
+
+    # Busca IDs das mensagens antigas que serão deletadas
+    old_msgs_res = (
+        db.table("stage_followup_messages")
+        .select("id")
+        .eq("step_id", step_id)
+        .not_.in_("id", new_ids)
+        .execute()
+    )
+    old_ids = [r["id"] for r in (old_msgs_res.data or [])]
+
+    if old_ids:
+        # ─── Desvincular schedules antes de deletar mensagens ────────────────
+        # stage_followup_schedules tem FK para stage_followup_messages.
+        # Se deletarmos a mensagem enquanto houver um schedule pending/processing
+        # apontando para ela, o banco retorna violação de FK.
+        # Solução: zera message_variation_id nos schedules que referenciam
+        # as mensagens antigas — o engine tem fallback para escolher outra variação.
+        db.table("stage_followup_schedules").update({
+            "message_variation_id": None,
+        }).in_("message_variation_id", old_ids).execute()
+
+        # Agora pode deletar com segurança
+        db.table("stage_followup_messages").delete().in_("id", old_ids).execute()
 
     return {"status": "ok", "saved": len(rows)}
 
