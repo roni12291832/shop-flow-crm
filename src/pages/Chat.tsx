@@ -59,6 +59,8 @@ interface WaMessage {
   timestamp: number | string | null; type?: string;
   source?: string; sender_type?: string;
   media_url?: string; mimetype?: string;
+  raw_message_id?: string; // ID original do UAZAPI para download de mídia
+  chat_id?: string;        // JID do chat para download de mídia
 }
 interface Client {
   id: string; name: string; phone: string | null;
@@ -136,19 +138,31 @@ function normalizeMessage(raw: any): WaMessage {
       msg.stickerMessage ? "stickerMessage" :
       msg.locationMessage ? "locationMessage" : "text");
 
+  // UAZAPI retorna URLs criptografadas do CDN do WhatsApp — não reproduzíveis diretamente.
+  // Guardamos o que tiver disponível mas usamos download-media para obter URL real.
+  const rawMediaUrl =
+    raw.mediaUrl || raw.media?.url ||
+    msg.imageMessage?.url || msg.videoMessage?.url ||
+    msg.audioMessage?.url || msg.pttMessage?.url ||
+    msg.documentMessage?.url || msg.stickerMessage?.url || undefined;
+
+  const rawId = raw.messageid || raw.id || key.id || "";
+
   return {
-    id: raw.messageid || raw.id || key.id || Math.random().toString(36).slice(2),
+    id: rawId || Math.random().toString(36).slice(2),
+    raw_message_id: rawId || undefined,
+    chat_id: key.remoteJid || raw.chatid || undefined,
     from_me: raw.fromMe ?? key.fromMe ?? false,
     text,
     timestamp: raw.messageTimestamp || raw.t || raw.timestamp,
     type,
     source: "whatsapp",
-    media_url:
-      msg.imageMessage?.url || msg.videoMessage?.url ||
-      msg.audioMessage?.url || msg.documentMessage?.url || undefined,
+    media_url: rawMediaUrl,
     mimetype:
+      raw.mimetype || raw.media?.mimetype ||
       msg.imageMessage?.mimetype || msg.videoMessage?.mimetype ||
-      msg.audioMessage?.mimetype || msg.documentMessage?.mimetype || undefined,
+      msg.audioMessage?.mimetype || msg.pttMessage?.mimetype ||
+      msg.documentMessage?.mimetype || undefined,
   };
 }
 
@@ -416,60 +430,151 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
   );
 }
 
+// ========== MediaResolver — busca URL real de mídia via UAZAPI ==========
+// UAZAPI retorna URLs criptografadas do WhatsApp CDN que não são reproduzíveis.
+// Este componente chama /message/download-media para obter a URL acessível.
+function MediaResolver({
+  msg, apiUrl, token, children
+}: {
+  msg: WaMessage;
+  apiUrl: string;
+  token: string;
+  children: (resolvedUrl: string | null, loading: boolean) => React.ReactNode;
+}) {
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(msg.media_url || null);
+  const [loading, setLoading] = useState(!msg.media_url && !!msg.raw_message_id);
+
+  useEffect(() => {
+    // Se já tem URL razoável, tenta usar ela diretamente.
+    // URLs do UAZAPI próprio (nexaflow.uazapi.com ou similar) já são acessíveis.
+    // URLs do CDN do WhatsApp (mmg.whatsapp.net, media-xxx.cdn.whatsapp.net) precisam download.
+    const needsDownload = !msg.media_url
+      || msg.media_url.includes("mmg.whatsapp.net")
+      || msg.media_url.includes("cdn.whatsapp.net")
+      || msg.media_url.includes("fna.whatsapp.net");
+
+    if (!needsDownload) { setLoading(false); return; }
+    if (!msg.raw_message_id) { setLoading(false); return; }
+
+    setLoading(true);
+    const base = apiUrl.replace(/\/$/, "");
+    fetch(`${base}/message/download-media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", token },
+      body: JSON.stringify({
+        messageid: msg.raw_message_id,
+        chatid: msg.chat_id || "",
+      }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        // UAZAPI pode retornar { url, base64, mimetype } — tentamos a URL primeiro
+        const url: string | undefined = data.url || data.mediaUrl || data.link;
+        if (url) {
+          setResolvedUrl(url);
+        } else if (data.base64) {
+          // Fallback: cria blob URL a partir do base64
+          const mime = data.mimetype || msg.mimetype || "application/octet-stream";
+          const byteChars = atob(data.base64);
+          const byteArr = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+          const blob = new Blob([byteArr], { type: mime });
+          setResolvedUrl(URL.createObjectURL(blob));
+        }
+      })
+      .catch(() => {
+        // Se download falhou, tenta a URL original como última tentativa
+        if (msg.media_url) setResolvedUrl(msg.media_url);
+      })
+      .finally(() => setLoading(false));
+  }, [msg.raw_message_id, msg.media_url, apiUrl, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return <>{children(resolvedUrl, loading)}</>;
+}
+
 // ========== MessageContent (improved) ==========
 function MessageContent({
-  msg, token, contactName, onImageClick
+  msg, token, apiUrl, contactName, onImageClick
 }: {
   msg: WaMessage;
   token: string;
+  apiUrl: string;
   contactName: string;
   onImageClick: (src: string) => void;
 }) {
   const type = (msg.type || "text").toLowerCase().replace("message", "");
-  const mediaUrl = msg.media_url;
   const text = msg.text;
 
-  if ((type.includes("image") || type === "image") && mediaUrl) {
+  const isImage = type.includes("image");
+  const isAudio = type.includes("audio") || type.includes("ptt");
+  const isVideo = type.includes("video");
+  const isDoc   = type.includes("document");
+
+  if (isImage) {
     return (
-      <div className="flex flex-col gap-1">
-        <img
-          src={mediaUrl}
-          alt="Imagem"
-          className="max-w-[220px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-          onClick={() => onImageClick(mediaUrl)}
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-        />
-        {text && !text.startsWith("[") && <p className="text-sm mt-1">{text}</p>}
-      </div>
+      <MediaResolver msg={msg} apiUrl={apiUrl} token={token}>
+        {(url, loading) => loading ? (
+          <div className="w-[200px] h-[150px] rounded-lg bg-muted animate-pulse flex items-center justify-center text-muted-foreground text-xs">Carregando imagem...</div>
+        ) : url ? (
+          <div className="flex flex-col gap-1">
+            <img
+              src={url}
+              alt="Imagem"
+              className="max-w-[220px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+              onClick={() => onImageClick(url)}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+            {text && !text.startsWith("[") && <p className="text-sm mt-1">{text}</p>}
+          </div>
+        ) : <p className="text-sm text-muted-foreground">📷 Imagem indisponível</p>}
+      </MediaResolver>
     );
   }
 
-  if ((type.includes("audio") || type.includes("ptt")) && mediaUrl) {
+  if (isAudio) {
     return (
-      <AudioPlayer
-        src={mediaUrl}
-        token={token}
-        fromMe={msg.from_me}
-        contactName={contactName}
-      />
+      <MediaResolver msg={msg} apiUrl={apiUrl} token={token}>
+        {(url, loading) => loading ? (
+          <div className="flex items-center gap-2 w-[220px] h-12 bg-muted/40 rounded-xl animate-pulse px-3">
+            <div className="w-8 h-8 rounded-full bg-muted-foreground/20" />
+            <div className="flex-1 h-2 bg-muted-foreground/20 rounded" />
+            <div className="w-8 text-xs text-muted-foreground">...</div>
+          </div>
+        ) : url ? (
+          <AudioPlayer src={url} token={token} fromMe={msg.from_me} contactName={contactName} />
+        ) : <p className="text-sm text-muted-foreground">🎤 Áudio indisponível</p>}
+      </MediaResolver>
     );
   }
 
-  if (type.includes("video") && mediaUrl) {
+  if (isVideo) {
     return (
-      <video controls className="max-w-[220px] rounded-lg" preload="metadata">
-        <source src={mediaUrl} />
-      </video>
+      <MediaResolver msg={msg} apiUrl={apiUrl} token={token}>
+        {(url, loading) => loading ? (
+          <div className="w-[220px] h-[140px] rounded-lg bg-muted animate-pulse flex items-center justify-center text-xs text-muted-foreground">Carregando vídeo...</div>
+        ) : url ? (
+          <video controls className="max-w-[220px] rounded-lg" preload="metadata">
+            <source src={url} />
+          </video>
+        ) : <p className="text-sm text-muted-foreground">🎥 Vídeo indisponível</p>}
+      </MediaResolver>
     );
   }
 
-  if (type.includes("document") && mediaUrl) {
-    const filename = text?.replace("[Documento: ", "").replace("]", "") || "Arquivo";
+  if (isDoc) {
+    const filename = text?.replace("[Documento: ", "").replace("]", "") || "Documento";
     return (
-      <a href={mediaUrl} target="_blank" rel="noopener noreferrer"
-        className="flex items-center gap-1.5 text-sm underline opacity-90">
-        <FileText className="h-4 w-4 shrink-0" /> {filename}
-      </a>
+      <MediaResolver msg={msg} apiUrl={apiUrl} token={token}>
+        {(url, loading) => loading ? (
+          <div className="flex items-center gap-2 p-2 bg-muted rounded-lg animate-pulse w-[180px] h-9" />
+        ) : url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-sm underline opacity-90">
+            <FileText className="h-4 w-4 shrink-0" /> {filename}
+          </a>
+        ) : <p className="text-sm text-muted-foreground">📎 Documento indisponível</p>}
+      </MediaResolver>
     );
   }
 
@@ -1321,6 +1426,7 @@ export default function Chat() {
                         <MessageContent
                           msg={m}
                           token={token}
+                          apiUrl={wpConfig?.api_url || ""}
                           contactName={activeChat?.name || "Contato"}
                           onImageClick={(src) => setLightboxSrc(src)}
                         />
