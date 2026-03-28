@@ -441,9 +441,11 @@ async def _recover_stuck_processing(db) -> int:
 async def job_process_followups() -> None:
     """Job principal — processa fila de follow-ups. Roda a cada hora via APScheduler."""
     async with registrar_automacao("stage_followup_engine"):
-        if not _is_within_window():
-            logger.info("Follow-up: fora da janela 08h–18h BRT — aguardando")
-            return
+        # TODO: reativar verificação de janela após teste
+        # if not _is_within_window():
+        #     logger.info("Follow-up: fora da janela 08h–18h BRT — aguardando")
+        #     return
+        logger.info("Follow-up: modo TESTE — janela horária desativada temporariamente")
 
         db = get_supabase()
 

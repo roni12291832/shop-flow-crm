@@ -126,11 +126,11 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
-    # Follow-up automático — a cada 1 hora
+    # Follow-up automático — MODO TESTE: a cada 2 minutos (produção: hours=1)
     if _FOLLOWUP_ENABLED and job_process_followups:
         scheduler.add_job(
             job_process_followups,
-            IntervalTrigger(hours=1),
+            IntervalTrigger(minutes=2),  # TODO: voltar para hours=1 após teste
             id="followup_engine",
             name="Motor de Follow-Up Automático",
             replace_existing=True,
