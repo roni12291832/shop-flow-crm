@@ -80,7 +80,7 @@ class CampaignRequest(BaseModel):
     def validate_stages(cls, v):
         for stage in v:
             if stage not in VALID_STAGES:
-                raise ValueError(f"Etapa '{stage}' inválida. Válidas: {VALID_STAGES}")
+                raise ValueError(f"Etapa '{stage}' inválida. Válidas: {sorted(VALID_STAGES)}")
         return v
 
 
@@ -213,7 +213,7 @@ async def preview_campaign_contacts(stage: str):
     para uma determinada etapa do pipeline.
     """
     if stage not in VALID_STAGES:
-        raise HTTPException(status_code=400, detail=f"Etapa inválida. Válidas: {VALID_STAGES}")
+        raise HTTPException(status_code=400, detail=f"Etapa inválida. Válidas: {sorted(VALID_STAGES)}")
 
     db = get_supabase()
 

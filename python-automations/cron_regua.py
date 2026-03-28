@@ -54,12 +54,20 @@ Mensagem base: {base}"""
         generated = result.get("variations", [])
 
         if len(generated) >= MIN_VARIATIONS:
-            # Apaga variações antigas antes de inserir as novas
+            # Insere PRIMEIRO as novas, depois apaga as antigas — se o insert falhar,
+            # as variações antigas permanecem intactas (nunca ficamos sem variações).
             try:
-                db.table("relationship_message_variations").delete().eq("rule_id", rule["id"]).execute()
                 rows = [{"rule_id": rule["id"], "content": v} for v in generated]
-                db.table("relationship_message_variations").insert(rows).execute()
-                logger.info("Variações salvas no banco para regra '%s' (%d)", rule["name"], len(generated))
+                insert_res = db.table("relationship_message_variations").insert(rows).execute()
+                if insert_res.data:
+                    # Insert OK → agora apaga as antigas (que não incluem as recém-inseridas)
+                    new_ids = [r["id"] for r in insert_res.data]
+                    db.table("relationship_message_variations").delete().eq(
+                        "rule_id", rule["id"]
+                    ).not_.in_("id", new_ids).execute()
+                    logger.info("Variações salvas no banco para regra '%s' (%d)", rule["name"], len(generated))
+                else:
+                    logger.warning("Insert de variações retornou vazio para regra '%s'", rule["name"])
             except Exception as save_err:
                 logger.warning("Erro ao salvar variações: %s", save_err)
             return generated
@@ -239,8 +247,24 @@ async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
     elif rule["trigger_event"] == "no_purchase":
         # Clientes que não compram há delay_days dias
         cutoff = today - timedelta(days=delay_days)
+        cutoff_iso = f"{cutoff.isoformat()}T23:59:59"
         try:
-            # Todos compradores
+            # Busca todas as vendas até o cutoff, agrupando por client_id
+            # Uma única query em vez de N+1
+            sales_res = (
+                db.table("sales_entries")
+                .select("client_id, created_at")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            # Monta mapa: client_id → data da última compra
+            last_sale_map: dict[str, str] = {}
+            for sale in (sales_res.data or []):
+                cid = sale.get("client_id")
+                if cid and cid not in last_sale_map:
+                    last_sale_map[cid] = sale["created_at"]
+
+            # Filtra compradores cuja última compra foi antes do cutoff
             buyer_res = (
                 db.table("opportunities")
                 .select("client_id")
@@ -249,25 +273,24 @@ async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
             )
             buyer_ids = list({b["client_id"] for b in (buyer_res.data or [])})
 
-            for client_id in buyer_ids:
-                # Última compra
-                last_sale_res = (
-                    db.table("sales_entries")
-                    .select("created_at")
-                    .eq("client_id", client_id)
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if not last_sale_res.data:
+            stale_buyer_ids = []
+            for cid in buyer_ids:
+                last_date_str = last_sale_map.get(cid)
+                if not last_date_str:
                     continue
-                last_sale_date = datetime.fromisoformat(
-                    last_sale_res.data[0]["created_at"].split("T")[0]
-                ).date()
-                if last_sale_date <= cutoff:
-                    client_res = db.table("clients").select("*").eq("id", client_id).limit(1).execute()
-                    if client_res.data:
-                        eligible_clients.append(client_res.data[0])
+                try:
+                    last_sale_date = datetime.fromisoformat(
+                        last_date_str.split("T")[0]
+                    ).date()
+                    if last_sale_date <= cutoff:
+                        stale_buyer_ids.append(cid)
+                except (ValueError, TypeError):
+                    continue
+
+            # Busca clientes elegíveis em batch (máximo 1 query em vez de N)
+            if stale_buyer_ids:
+                clients_res = db.table("clients").select("*").in_("id", stale_buyer_ids).execute()
+                eligible_clients = clients_res.data or []
         except Exception as e:
             logger.warning("Erro ao buscar clientes no_purchase: %s", e)
 
@@ -277,8 +300,10 @@ async def process_rule(rule: dict, wp_config: dict, openai_client) -> None:
         try:
             clients_res = (
                 db.table("clients")
-                .select("*")
+                .select("id, name, phone, email, origin, birth_date")
                 .not_.is_("birth_date", "null")
+                .not_.is_("phone", "null")
+                .limit(5000)
                 .execute()
             )
             for c in (clients_res.data or []):

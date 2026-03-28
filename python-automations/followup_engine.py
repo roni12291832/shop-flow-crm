@@ -200,9 +200,16 @@ async def on_stage_change(
     return {"scheduled": created, "cancelled": cancelled}
 
 
+AUTO_MOVE_GRACE_HOURS = 24  # Espera pelo menos 24h após o último envio antes de mover
+
+
 async def _auto_move_expired(db) -> int:
-    """Verifica steps com auto_move_to e move oportunidades sem resposta."""
-    now_utc = datetime.now(timezone.utc).isoformat()
+    """Verifica steps com auto_move_to e move oportunidades sem resposta.
+
+    Período de carência: só move se o último envio foi há mais de
+    AUTO_MOVE_GRACE_HOURS horas, dando tempo ao lead para responder.
+    """
+    now_utc = datetime.now(timezone.utc)
     moved = 0
 
     # Busca steps com auto_move_to configurado
@@ -222,8 +229,14 @@ async def _auto_move_expired(db) -> int:
             .eq("status", "sent")
             .execute()
         )
+        # Deduplica opp_ids (pode ter múltiplos registros "sent" para mesma opp)
+        seen_opps: set[str] = set()
         for sched in (sent_res.data or []):
             opp_id = sched["opportunity_id"]
+            if opp_id in seen_opps:
+                continue
+            seen_opps.add(opp_id)
+
             # Verifica se a opp ainda está na etapa original
             opp_res = (
                 db.table("opportunities")
@@ -241,12 +254,12 @@ async def _auto_move_expired(db) -> int:
                 db.table("stage_followup_schedules")
                 .select("id")
                 .eq("opportunity_id", opp_id)
-                .eq("status", "pending")
+                .in_("status", ["pending", "processing"])
                 .limit(1)
                 .execute()
             )
             if pending_res.data:
-                continue  # ainda tem pendentes, não mover
+                continue  # ainda tem pendentes ou em processamento, não mover
 
             # Busca quando o último step foi enviado para esta opp
             last_sent_res = (
@@ -263,6 +276,18 @@ async def _auto_move_expired(db) -> int:
                 continue
 
             last_sent_at = last_sent_res.data[0]["sent_at"]
+
+            # ─── Período de carência ─────────────────────────────────────
+            # Só move se o último envio foi há pelo menos AUTO_MOVE_GRACE_HOURS horas.
+            # Evita mover leads que acabaram de receber a última mensagem.
+            try:
+                sent_dt = datetime.fromisoformat(last_sent_at.replace("Z", "+00:00"))
+                hours_since = (now_utc - sent_dt).total_seconds() / 3600
+                if hours_since < AUTO_MOVE_GRACE_HOURS:
+                    continue  # ainda dentro do período de carência
+            except (ValueError, TypeError):
+                continue  # timestamp inválido, pula por segurança
+
             client_id = opp_res.data[0]["client_id"]
 
             # Verifica se o cliente enviou QUALQUER mensagem APÓS o envio do último step.
@@ -283,7 +308,7 @@ async def _auto_move_expired(db) -> int:
                 )
                 continue  # cliente respondeu, não mover
 
-            # Sem pendentes, sem resposta após o último step → move
+            # Sem pendentes, sem resposta após carência → move
             if not DRY_RUN:
                 db.table("opportunities").update({
                     "stage": step["auto_move_to"],
@@ -342,6 +367,36 @@ async def cancel_pending_for_client(client_id: str, reason: str = "respondeu") -
         return 0
 
 
+async def _recover_stuck_processing(db) -> int:
+    """
+    Recupera schedules travados em 'processing' há mais de 10 minutos.
+    Isso acontece quando o servidor reinicia (Koyeb redeploy) durante o processamento.
+    Devolve os registros para 'pending' para serem reprocessados no próximo ciclo.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    try:
+        res = (
+            db.table("stage_followup_schedules")
+            .update({
+                "status": "pending",
+                "processing_started_at": None,
+            })
+            .eq("status", "processing")
+            .lt("processing_started_at", cutoff)
+            .execute()
+        )
+        recovered = len(res.data or [])
+        if recovered:
+            logger.warning(
+                "Recuperados %d schedules travados em 'processing' (provavelmente redeploy)",
+                recovered,
+            )
+        return recovered
+    except Exception as e:
+        logger.warning("Erro ao recuperar schedules travados: %s", e)
+        return 0
+
+
 async def job_process_followups() -> None:
     """Job principal — processa fila de follow-ups. Roda a cada hora via APScheduler."""
     async with registrar_automacao("stage_followup_engine"):
@@ -350,6 +405,9 @@ async def job_process_followups() -> None:
             return
 
         db = get_supabase()
+
+        # Recupera schedules travados por redeploy (BUG #2)
+        await _recover_stuck_processing(db)
 
         # Auto-move leads expirados
         moved = await _auto_move_expired(db)
@@ -494,6 +552,12 @@ async def job_process_followups() -> None:
 
                 if DRY_RUN:
                     logger.info("[DRY_RUN] Follow-up step %d '%s' para %s: %.60s...", sched["step_number"], stage, client["name"], message_text)
+                    # Em DRY_RUN: reverte lock para pending (não consome a fila real)
+                    db.table("stage_followup_schedules").update({
+                        "status": "pending",
+                        "processing_started_at": None,
+                    }).eq("id", sched["id"]).execute()
+                    continue
                 else:
                     try:
                         resp = await uazapi.send_text(

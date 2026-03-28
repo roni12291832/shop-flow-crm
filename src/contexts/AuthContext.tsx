@@ -114,45 +114,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Flag para evitar double-fetch: onAuthStateChange e getSession podem
+    // disparar ao mesmo tempo. Apenas o primeiro carrega profile/roles/cores.
+    let initialLoadDone = false;
+
+    const loadUserData = async (userId: string) => {
+      if (initialLoadDone) return;
+      initialLoadDone = true;
+      try {
+        await Promise.all([
+          fetchProfile(userId),
+          fetchRoles(userId),
+          fetchAndApplyTenantColors(),
+        ]);
+      } catch (err) {
+        console.error("Erro ao carregar perfil do usuário:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          setTimeout(async () => {
-            try {
-              await Promise.all([
-                fetchProfile(session.user.id),
-                fetchRoles(session.user.id),
-                fetchAndApplyTenantColors(),
-              ]);
-            } catch (err) {
-              console.error("Erro ao carregar perfil do usuário:", err);
-            } finally {
-              setLoading(false);
-            }
-          }, 0);
+          // setTimeout(0) evita deadlock com token refresh do Supabase
+          setTimeout(() => loadUserData(session.user.id), 0);
         } else {
           setProfile(null);
           setRoles([]);
+          initialLoadDone = true;
           setLoading(false);
         }
       }
     );
 
+    // Carregamento inicial — caso onAuthStateChange não dispare imediatamente
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        Promise.all([
-          fetchProfile(session.user.id),
-          fetchRoles(session.user.id),
-          fetchAndApplyTenantColors(),
-        ])
-          .catch((err) => console.error("Erro ao carregar sessão:", err))
-          .finally(() => setLoading(false));
+        loadUserData(session.user.id);
       } else {
+        initialLoadDone = true;
         setLoading(false);
       }
     });

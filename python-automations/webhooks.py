@@ -61,8 +61,27 @@ def _extract_message_text(msg_obj: dict, message_data: dict) -> tuple[str, str]:
             return text, key
 
     # Tipo desconhecido — tenta campos genéricos e loga para mapeamento futuro
-    fallback = message_data.get("body") or message_data.get("text") or ""
+    fallback = (
+        message_data.get("body") 
+        or message_data.get("text") 
+        or message_data.get("caption") 
+        or ""
+    )
+    
+    if not fallback:
+        # Tenta extrair qualquer coisa de qualquer chave que pareça conter texto
+        for k, v in msg_obj.items():
+            if isinstance(v, dict):
+                fallback = v.get("text") or v.get("caption") or v.get("body")
+                if fallback: break
+            elif isinstance(v, str) and len(v) > 2:
+                fallback = v
+                break
+
     unknown_keys = list(msg_obj.keys())
+    if not fallback:
+        fallback = f"[Mensagem {unknown_keys[0] if unknown_keys else 'ignorada'}]"
+        
     logger.warning("Tipo de mensagem UAZAPI desconhecido: %s — fallback='%s'", unknown_keys, fallback[:50])
     return fallback, "unknown"
 
@@ -120,17 +139,25 @@ async def receive_whatsapp_message(request: Request):
     message_data = body.get("data", body)
 
     # UAZAPI GO envia eventos variados. 
-    # Precisamos de MESSAGE (recebimento), CHATS_DELETE (sync apagados) e MESSAGES_DELETE (sync apagados)
+    # Precisamos de MESSAGE (recebimento), CHATS_DELETE (sync apagados), MESSAGES_DELETE (sync apagados)
+    # e MESSAGES_UPDATE (status de entrega/erro)
     is_message = "MESSAGE" in event
-    is_delete = "DELETE" in event
+    is_delete  = "DELETE" in event
+    is_update  = "UPDATE" in event
     
-    if not (is_message or is_delete):
+    if not (is_message or is_delete or is_update):
         if event:
             logger.info(f"Webhook ignorado: evento '{event}' não processado")
         return {"status": "ignored", "reason": f"evento {event} não processado"}
 
-    if not isinstance(message_data, dict):
+    if not isinstance(message_data, (dict, list)):
         return {"status": "ignored", "reason": "formato de dados não reconhecido"}
+
+    # Normaliza message_data para dict para os fluxos que esperam objeto único
+    # (MESSAGE, DELETE)
+    msg_data_dict = message_data[0] if isinstance(message_data, list) and len(message_data) > 0 else message_data
+    if not isinstance(msg_data_dict, dict):
+        msg_data_dict = {}
 
     # ─── Tratamento de Exclusão (Sync) ──────────────────────────────
     if is_delete:
@@ -138,7 +165,7 @@ async def receive_whatsapp_message(request: Request):
             db = get_supabase()
             if "CHAT" in event:
                 # Exclusão de conversa
-                remote_jid = message_data.get("number") or message_data.get("remoteJid") or ""
+                remote_jid = msg_data_dict.get("number") or msg_data_dict.get("remoteJid") or ""
                 phone = remote_jid.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
                 if phone:
                     # Busca cliente para apagar conversas vinculadas
@@ -153,7 +180,7 @@ async def receive_whatsapp_message(request: Request):
             
             elif "MESSAGE" in event:
                 # Exclusão de mensagem única
-                msg_id = message_data.get("id") or message_data.get("messageid")
+                msg_id = msg_data_dict.get("id") or msg_data_dict.get("messageid")
                 if msg_id:
                     db.table("messages").delete().eq("id", msg_id).execute()
                     # Fallback para IDs do CRM
@@ -166,27 +193,47 @@ async def receive_whatsapp_message(request: Request):
             logger.error(f"Erro ao processar sync de delete: {e}")
             return {"status": "error", "message": str(e)}
 
+    # ─── Tratamento de Status de Entrega (Sync/Status) ─────────────
+    if is_update:
+        # MESSAGES_UPDATE ou MESSAGES_SET traz status de entrega (ack)
+        # Geralmente é uma lista de mensagens
+        msgs = message_data if isinstance(message_data, list) else [message_data]
+        updated_count = 0
+        for m in msgs:
+            msg_id = m.get("id") or (m.get("key") or {}).get("id")
+            update = m.get("update") or m
+            status = update.get("status") or update.get("ack")
+            
+            if msg_id and status is not None:
+                # Mapeia status do WhatsApp: 3=DEALIVRED, 4=READ, etc.
+                # Se for erro (depende da implementação UAZAPI, mas geralmente status > 0)
+                db = get_supabase()
+                db.table("messages").update({"status": str(status)}).eq("provider_message_id", msg_id).execute()
+                updated_count += 1
+        
+        return {"status": "updated", "count": updated_count}
+
     # ─── Tratamento de Mensagens Recebidas ────────────────────────────
-    key = message_data.get("key", {})
-    remote_jid = key.get("remoteJid", "") or message_data.get("from", "") or ""
-    from_me = key.get("fromMe", False) or message_data.get("fromMe", False)
+    key = msg_data_dict.get("key", {})
+    remote_jid = key.get("remoteJid", "") or msg_data_dict.get("from", "") or ""
+    from_me = key.get("fromMe", False) or msg_data_dict.get("fromMe", False)
 
     # ID único da mensagem no WhatsApp — usado para deduplicação
     provider_message_id = (
         key.get("id")
-        or message_data.get("id")
-        or message_data.get("messageId")
+        or msg_data_dict.get("id")
+        or msg_data_dict.get("messageId")
     )
 
-    msg_obj = message_data.get("message", {}) or {}
+    msg_obj = msg_data_dict.get("message", {}) or {}
     if isinstance(msg_obj, str):
         message_text, _msg_type = msg_obj, "text"
     else:
-        message_text, _msg_type = _extract_message_text(msg_obj, message_data)
+        message_text, _msg_type = _extract_message_text(msg_obj, msg_data_dict)
 
     push_name = (
-        message_data.get("pushName", "")
-        or message_data.get("senderName", "")
+        msg_data_dict.get("pushName", "")
+        or msg_data_dict.get("senderName", "")
         or f"WhatsApp {remote_jid.split('@')[0][-4:] if '@' in remote_jid else 'Lead'}"
     )
 
@@ -428,18 +475,18 @@ async def receive_whatsapp_message(request: Request):
             history = list(reversed(history_res.data or []))
 
             # analyze_client_intent retorna True/False/None
-        # None = IA indisponível — não penaliza o lead, apenas pula a resposta automática
-        intent = await jarvis.analyze_client_intent(message_text) if message_text else False
+            # None = IA indisponível — não penaliza o lead, apenas pula a resposta automática
+            intent = await jarvis.analyze_client_intent(message_text) if message_text else False
 
-        reply = None
-        if intent is not False:  # True ou None (incerto) → tenta responder
-            reply = await jarvis.auto_reply_lead(
-                client_name=client.get("name", "Cliente"),
-                client_message=message_text,
-                client_history=history,
-            )
+            reply = None
+            if intent is not False:  # True ou None (incerto) → tenta responder
+                reply = await jarvis.auto_reply_lead(
+                    client_name=client.get("name", "Cliente"),
+                    client_message=message_text,
+                    client_history=history,
+                )
 
-        if reply:
+            if reply:
                 instance_res = (
                     db.table("whatsapp_instances")
                     .select("api_url, api_token, instance_name")
@@ -453,25 +500,30 @@ async def receive_whatsapp_message(request: Request):
                     if DRY_RUN:
                         logger.info("[DRY_RUN] Jarvis responderia para %s: %.80s...", push_name, reply)
                     else:
-                        await uazapi.send_text(
+                        resp = await uazapi.send_text(
                             api_url=inst["api_url"],
                             api_token=inst["api_token"],
                             instance_name=inst["instance_name"],
                             phone=phone,
                             message=reply,
                         )
-                        db.table("messages").insert({
-                            "conversation_id": conversation_id,
-                            "client_id": client_id,
-                            "content": reply,
-                            "sender_type": "agent",
-                            "channel": "whatsapp",
-                            "is_from_client": False,
-                            "type": "text",
-                            "direction": "outbound",
-                        }).execute()
-                        logger.info("Jarvis respondeu automaticamente para %s", push_name)
-
+                        
+                        if "error" in resp:
+                            logger.error("Jarvis: falha ao enviar resposta para %s: %s (%s)", 
+                                         push_name, resp.get("error"), resp.get("error_code"))
+                        else:
+                            db.table("messages").insert({
+                                "conversation_id": conversation_id,
+                                "client_id": client_id,
+                                "content": reply,
+                                "sender_type": "agent",
+                                "channel": "whatsapp",
+                                "is_from_client": False,
+                                "type": "text",
+                                "direction": "outbound",
+                                "provider_message_id": resp.get("id") or resp.get("messageId"),
+                            }).execute()
+                            logger.info("Jarvis respondeu automaticamente para %s", push_name)
         except Exception as e:
             logger.warning("Jarvis auto-reply falhou (não crítico): %s", e)
 

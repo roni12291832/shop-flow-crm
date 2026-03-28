@@ -14,6 +14,16 @@ from stages import STAGE_ORDER
 
 logger = logging.getLogger("shopflow")
 
+# Cliente OpenAI singleton — reutilizado em todas as chamadas (evita criar conexão HTTP por mensagem)
+_openai_client: AsyncOpenAI | None = None
+
+
+def _get_openai_client() -> AsyncOpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = AsyncOpenAI(api_key=get_settings().openai_api_key)
+    return _openai_client
+
 def _parse_gpt_json(content: str) -> dict:
     """
     Extrai JSON da resposta do GPT de forma robusta.
@@ -85,8 +95,7 @@ async def analyze_and_move_lead(
         return {"moved": False, "reason": "mensagem vazia"}
 
     try:
-        s = get_settings()
-        client = AsyncOpenAI(api_key=s.openai_api_key)
+        client = _get_openai_client()
 
         # Monta histórico para o prompt
         history_lines = []

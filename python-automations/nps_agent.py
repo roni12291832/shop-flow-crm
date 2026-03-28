@@ -87,14 +87,44 @@ Resposta do cliente: {raw_response}"""
             logger.warning("NPS Agent: JSON inválido do GPT — %s", e)
             return {"error": f"JSON inválido: {e}"}
 
+        # ─── Validação do score ──────────────────────────────────────────
+        raw_score = result.get("score")
+        if raw_score is not None:
+            try:
+                score = int(float(raw_score))  # aceita "8.5" → 8
+                score = max(0, min(10, score))  # clamp entre 0-10
+            except (ValueError, TypeError):
+                score = None
+        else:
+            score = None
+
+        valid_classifications = {"promotor", "neutro", "detrator"}
+        classification = result.get("classification", "")
+        if classification not in valid_classifications:
+            # Infere da nota se a classificação do GPT for inválida
+            if score is not None:
+                if score >= 9:
+                    classification = "promotor"
+                elif score >= 7:
+                    classification = "neutro"
+                else:
+                    classification = "detrator"
+            else:
+                classification = None
+
+        valid_sentiments = {"positivo", "neutro", "negativo"}
+        sentiment = result.get("sentiment", "")
+        if sentiment not in valid_sentiments:
+            sentiment = None
+
         # Atualizar no banco — colunas garantidas pela migration 20260328000002
         db = get_supabase()
         db.table("nps_surveys").update({
-            "score":          result.get("score"),
-            "classification": result.get("classification"),
-            "sentiment":      result.get("sentiment"),
-            "themes":         result.get("themes"),
-            "summary":        result.get("summary"),
+            "score":          score,
+            "classification": classification,
+            "sentiment":      sentiment,
+            "themes":         result.get("themes") if isinstance(result.get("themes"), list) else None,
+            "summary":        str(result.get("summary", ""))[:500] if result.get("summary") else None,
             "status":         "responded",
             "responded_at":   datetime.now(timezone.utc).isoformat(),
             "processed_at":   datetime.now(timezone.utc).isoformat(),

@@ -126,8 +126,7 @@ class UazapiClient:
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao enviar mídia ({media_type}) para {phone}: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida no envio de mídia"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def send_location(
         self,
@@ -168,8 +167,7 @@ class UazapiClient:
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao enviar localização para {phone}: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida no envio de localização"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_message(
         self,
@@ -194,8 +192,7 @@ class UazapiClient:
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao apagar mensagem {message_id}: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida ao apagar mensagem"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_chat(
         self,
@@ -228,8 +225,7 @@ class UazapiClient:
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao deletar chat {phone}: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida ao deletar chat"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_instance(
         self,
@@ -255,8 +251,7 @@ class UazapiClient:
                 return resp.json()
             except Exception as e:
                 logger.error(f"Erro ao deletar instância UAZAPI: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida ao deletar instância"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def send_bulk_campaign(
         self,
@@ -301,6 +296,16 @@ class UazapiClient:
                 errs = results.get("errors")
                 if isinstance(errs, list):
                     errs.append({"phone": phone, "error": resp["error"]})
+                # Rate limit → para imediatamente para não piorar a situação
+                error_code = resp.get("error_code", "")
+                if error_code == "rate_limit":
+                    logger.warning("Rate limit UAZAPI — campanha interrompida após %d envios", results["sent"])
+                    results["errors"].append({"phone": "SISTEMA", "error": "Rate limit atingido — campanha pausada"})
+                    break
+                elif error_code == "auth_error":
+                    logger.error("Token inválido — campanha interrompida")
+                    results["errors"].append({"phone": "SISTEMA", "error": "Token WhatsApp inválido"})
+                    break
             else:
                 results["sent"] = (results.get("sent") or 0) + 1
 
@@ -398,7 +403,6 @@ class UazapiClient:
             except Exception as e:
                 logger.error("Erro ao buscar chats: %s", e)
                 return []
-        return []
 
     # ─── Mensagens ────────────────────────────────────────────────────────
 
@@ -459,7 +463,6 @@ class UazapiClient:
             except Exception as e:
                 logger.error("Erro ao buscar mensagens de %s: %s", chat_id, e)
                 return []
-        return []
 
     # ─── Normalização ─────────────────────────────────────────────────────
 

@@ -192,7 +192,7 @@ app = FastAPI(
         "- 📊 Relatório diário automático via WhatsApp\n"
         "- 🔄 Sincronização de mensagens offline\n"
     ),
-    version="1.1.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -244,7 +244,7 @@ async def root():
     return {
         "service": "Shop Flow CRM Automações",
         "status": "online",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "followup_enabled": _FOLLOWUP_ENABLED,
         "import_error": _IMPORT_ERROR if _IMPORT_ERROR else None,
         "scheduled_jobs": jobs,

@@ -114,7 +114,14 @@ async def job_sync_offline_messages():
                 .limit(1)
                 .execute()
             )
-            last_ts = last_msg_res.data[0].get("created_at") if last_msg_res.data else None
+            last_ts_raw = last_msg_res.data[0].get("created_at") if last_msg_res.data else None
+            # Converte para datetime para comparação segura (evita problemas de formato ISO)
+            last_ts_dt = None
+            if last_ts_raw:
+                try:
+                    last_ts_dt = datetime.fromisoformat(last_ts_raw.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    last_ts_dt = None
 
             # Busca mensagens do WhatsApp para este chat
             chat_jid = chat.get("id", "")
@@ -167,18 +174,37 @@ async def job_sync_offline_messages():
                 # Converte timestamp UAZAPI para datetime
                 ts = msg.get("timestamp")
                 if isinstance(ts, (int, float)):
-                    msg_time = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                    msg_time_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
                 elif isinstance(ts, str):
-                    msg_time = ts
+                    try:
+                        msg_time_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        msg_time_dt = datetime.now(timezone.utc)
                 else:
-                    msg_time = datetime.now(timezone.utc).isoformat()
+                    msg_time_dt = datetime.now(timezone.utc)
 
-                # Pula se a mensagem é anterior à última salva
-                if last_ts and msg_time <= last_ts:
+                # Pula se a mensagem é anterior à última salva (comparação datetime, não string)
+                if last_ts_dt and msg_time_dt <= last_ts_dt:
                     continue
+
+                msg_time = msg_time_dt.isoformat()
 
                 try:
                     if not DRY_RUN:
+                        # Usa provider_message_id para evitar duplicatas com mensagens do webhook
+                        msg_provider_id = msg.get("id") or None
+                        if msg_provider_id:
+                            # Verifica se já existe antes de inserir
+                            dup_check = (
+                                db.table("messages")
+                                .select("id")
+                                .eq("provider_message_id", msg_provider_id)
+                                .limit(1)
+                                .execute()
+                            )
+                            if dup_check.data:
+                                continue  # já foi inserida pelo webhook
+
                         db.table("messages").insert({
                             "conversation_id": conversation_id,
                             "client_id": client_id,
@@ -186,6 +212,7 @@ async def job_sync_offline_messages():
                             "sender_type": "atendente" if msg.get("from_me") else "cliente",
                             "channel": "whatsapp",
                             "is_from_client": not msg.get("from_me", False),
+                            "provider_message_id": msg_provider_id,
                         }).execute()
                         inserted_count += 1
                 except Exception as e:
