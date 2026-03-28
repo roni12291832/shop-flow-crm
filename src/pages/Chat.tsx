@@ -5,6 +5,7 @@ import {
   Search, Bot, Send, Plus, Trash2, WifiOff, Wifi, Phone,
   User, ArrowLeft, Paperclip, MapPin, Loader2, Mic,
   Image as ImageIcon, FileText, CheckCheck, Check, X,
+  Smile, CornerUpLeft, ChevronDown, Play, Pause, Download,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,6 +30,19 @@ const STAGES = [
 
 const PYTHON_BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+const WAVEFORM_HEIGHTS = [4, 8, 12, 6, 16, 10, 4, 14, 8, 12, 6, 18, 10, 4, 12, 8, 16, 6, 10, 4];
+
+const EMOJIS = [
+  "😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇",
+  "🙂","🙃","😉","😌","😍","🥰","😘","😗","😙","😚",
+  "😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔",
+  "🤐","🤨","😐","😑","😶","😏","😒","🙄","😬","🤥",
+  "😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤧",
+  "🥵","🥶","🥴","😵","🤯","🤠","🥳","😎","🤓","🧐",
+  "👍","👎","👋","🤚","✋","🖐","👌","🤌","✌","🤞",
+  "🤙","💪","🦾","🙏","❤","🧡","💛","💚","💙","💜",
+];
+
 // ---------- Interfaces ----------
 interface WpInstance {
   api_url: string; api_token: string; instance_name: string;
@@ -50,6 +64,12 @@ interface Client {
   id: string; name: string; phone: string | null;
   ticket_medio: number | null; origin: string | null;
   avatar_url?: string | null;
+}
+interface ReplyInfo {
+  id: string;
+  from_me: boolean;
+  text: string;
+  contactName: string;
 }
 
 // ---------- Helpers ----------
@@ -140,15 +160,12 @@ async function fetchUazapi(url: string, token: string, method = "GET", body?: an
   return res.json();
 }
 
-// Converte timestamp para Date — detecta automaticamente segundos vs milissegundos
-// UAZAPI retorna messageTimestamp em segundos (ex: 1711450000), mas às vezes em ms
 function tsToDate(ts: number | string | null): Date | null {
   if (!ts) return null;
   if (typeof ts === "string") {
     const d = new Date(ts);
     return isNaN(d.getTime()) ? null : d;
   }
-  // Se > 1e12 já está em milissegundos; caso contrário, está em segundos
   const ms = ts > 1e12 ? ts : ts * 1000;
   const d = new Date(ms);
   return isNaN(d.getTime()) ? null : d;
@@ -187,8 +204,227 @@ function getInitials(name: string): string {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "?";
 }
 
-// ========== MessageContent ==========
-function MessageContent({ msg }: { msg: WaMessage }) {
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// Gera cor de gradiente única por nome
+function nameToGradient(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const h1 = Math.abs(hash) % 360;
+  const h2 = (h1 + 40) % 360;
+  return `linear-gradient(135deg, hsl(${h1},65%,50%), hsl(${h2},65%,40%))`;
+}
+
+// ========== AudioPlayer ==========
+function AudioPlayer({ src, token, fromMe, contactName }: {
+  src: string; token: string; fromMe: boolean; contactName: string;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    fetch(src, { headers: { token } })
+      .then(r => {
+        if (!r.ok) throw new Error("fetch failed");
+        return r.blob();
+      })
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        setLoadError(true);
+      });
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src, token]);
+
+  const audioSrc = loadError ? src : (blobUrl || undefined);
+
+  const togglePlay = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); setPlaying(false); }
+    else { a.play(); setPlaying(true); }
+  };
+
+  const handleTimeUpdate = () => {
+    const a = audioRef.current;
+    if (a) setCurrent(a.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    const a = audioRef.current;
+    if (a && a.duration && isFinite(a.duration)) setDuration(a.duration);
+  };
+
+  const handleEnded = () => setPlaying(false);
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = progressRef.current?.getBoundingClientRect();
+    if (!rect || !audioRef.current) return;
+    const ratio = (e.clientX - rect.left) / rect.width;
+    audioRef.current.currentTime = ratio * (duration || 0);
+  };
+
+  const progress = duration > 0 ? current / duration : 0;
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl min-w-[220px] max-w-[280px] ${fromMe ? "bg-black/10" : "bg-black/5 dark:bg-white/5"}`}>
+      {/* Avatar */}
+      <div
+        className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0"
+        style={{ background: nameToGradient(contactName) }}
+      >
+        {getInitials(contactName)}
+      </div>
+
+      {/* Play/Pause */}
+      <button
+        onClick={togglePlay}
+        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+      >
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
+      </button>
+
+      {/* Waveform + progress */}
+      <div className="flex-1 flex flex-col gap-1">
+        <div className="flex items-center gap-[2px] h-[20px]">
+          {WAVEFORM_HEIGHTS.map((h, i) => {
+            const filled = progress > 0 && i / WAVEFORM_HEIGHTS.length < progress;
+            return (
+              <div
+                key={i}
+                className={`rounded-full transition-all ${filled ? "bg-emerald-500" : "bg-current opacity-30"} ${playing ? "animate-pulse" : ""}`}
+                style={{ width: 2, height: h, animationDelay: `${i * 40}ms`, animationDuration: "0.8s" }}
+              />
+            );
+          })}
+        </div>
+        {/* Progress bar */}
+        <div
+          ref={progressRef}
+          className="h-1 rounded-full bg-current/20 cursor-pointer"
+          onClick={handleProgressClick}
+        >
+          <div
+            className="h-full rounded-full bg-emerald-500 transition-all"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+        {/* Timer */}
+        <div className="text-[10px] opacity-60 flex justify-between">
+          <span>{formatDuration(current)}</span>
+          <span>{formatDuration(duration)}</span>
+        </div>
+      </div>
+
+      <audio
+        ref={audioRef}
+        src={audioSrc}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleEnded}
+        preload="metadata"
+        className="hidden"
+      />
+    </div>
+  );
+}
+
+// ========== ImageLightbox ==========
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  const handleDownload = () => {
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = "imagem.jpg";
+    a.target = "_blank";
+    a.click();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute top-4 right-4 flex gap-2 z-10">
+        <button
+          className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+          title="Download"
+          onClick={(e) => { e.stopPropagation(); handleDownload(); }}
+        >
+          <Download className="h-4 w-4" />
+        </button>
+        <button
+          className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+          onClick={onClose}
+          title="Fechar"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <img
+        src={src}
+        alt="Imagem ampliada"
+        className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
+// ========== EmojiPicker ==========
+function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-14 left-0 z-30 bg-card border border-border rounded-2xl shadow-xl p-3 w-[280px]"
+    >
+      <div className="grid grid-cols-10 gap-1">
+        {EMOJIS.map((emoji, i) => (
+          <button
+            key={i}
+            className="text-xl hover:bg-muted rounded p-0.5 transition-colors leading-none"
+            onClick={() => { onSelect(emoji); }}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ========== MessageContent (improved) ==========
+function MessageContent({
+  msg, token, contactName, onImageClick
+}: {
+  msg: WaMessage;
+  token: string;
+  contactName: string;
+  onImageClick: (src: string) => void;
+}) {
   const type = (msg.type || "text").toLowerCase().replace("message", "");
   const mediaUrl = msg.media_url;
   const text = msg.text;
@@ -200,7 +436,7 @@ function MessageContent({ msg }: { msg: WaMessage }) {
           src={mediaUrl}
           alt="Imagem"
           className="max-w-[220px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-          onClick={() => window.open(mediaUrl, "_blank")}
+          onClick={() => onImageClick(mediaUrl)}
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
         />
         {text && !text.startsWith("[") && <p className="text-sm mt-1">{text}</p>}
@@ -210,7 +446,12 @@ function MessageContent({ msg }: { msg: WaMessage }) {
 
   if ((type.includes("audio") || type.includes("ptt")) && mediaUrl) {
     return (
-      <audio controls src={mediaUrl} className="h-8 max-w-[220px]" preload="metadata" />
+      <AudioPlayer
+        src={mediaUrl}
+        token={token}
+        fromMe={msg.from_me}
+        contactName={contactName}
+      />
     );
   }
 
@@ -227,22 +468,21 @@ function MessageContent({ msg }: { msg: WaMessage }) {
     return (
       <a href={mediaUrl} target="_blank" rel="noopener noreferrer"
         className="flex items-center gap-1.5 text-sm underline opacity-90">
-        📎 {filename}
+        <FileText className="h-4 w-4 shrink-0" /> {filename}
       </a>
     );
   }
 
   if (type.includes("location")) {
-    return <p className="text-sm">📍 Localização enviada</p>;
+    return <p className="text-sm flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> Localização enviada</p>;
   }
 
   if (type.includes("sticker")) {
     return <p className="text-sm">🎭 Sticker</p>;
   }
 
-  // Default: texto
   const displayText = text || msgTypePreview(msg.type, "");
-  return <p className="text-sm whitespace-pre-wrap break-words">{displayText}</p>;
+  return <p className="text-[13.5px] leading-[1.4] whitespace-pre-wrap break-words">{displayText}</p>;
 }
 
 // ========== COMPONENT ==========
@@ -266,9 +506,26 @@ export default function Chat() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  // New states
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ReplyInfo | null>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [searchMsg, setSearchMsg] = useState("");
+  const [showMsgSearch, setShowMsgSearch] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+
+  const token = wpConfig ? (wpConfig.instance_token || wpConfig.api_token) : "";
 
   // ---------- Load WP config ----------
   useEffect(() => {
@@ -284,18 +541,17 @@ export default function Chat() {
   // ---------- Fetch chats ----------
   const fetchChats = useCallback(async () => {
     if (!wpConfig || wpConfig.status !== "connected") return;
-    const token = wpConfig.instance_token || wpConfig.api_token;
-    if (!token) return;
+    const tok = wpConfig.instance_token || wpConfig.api_token;
+    if (!tok) return;
     setLoadingChats(true);
     setChatError(null);
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/chat/find`;
-      const data = await fetchUazapi(url, token, "POST", { limit: 50 });
+      const data = await fetchUazapi(url, tok, "POST", { limit: 50 });
       const raw: any[] = Array.isArray(data) ? data : (data.chats || data.data || data.result || []);
 
       let normalized = raw.map(normalizeChat).filter(c => !c.is_group && c.phone.length >= 8);
 
-      // Enrich with CRM names (tenta ambos formatos de telefone)
       const phones = normalized.map(c => c.phone);
       const alts = phones.map(p => p.startsWith("55") ? p.slice(2) : `55${p}`);
       const allPhones = [...new Set([...phones, ...alts])];
@@ -336,16 +592,15 @@ export default function Chat() {
   // ---------- Fetch messages ----------
   const fetchMessages = useCallback(async (chatId: string) => {
     if (!wpConfig) return;
-    const token = wpConfig.instance_token || wpConfig.api_token;
+    const tok = wpConfig.instance_token || wpConfig.api_token;
     const fullJid = chatId.includes("@") ? chatId : `${chatId}@s.whatsapp.net`;
     setLoadingMessages(true);
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/message/find`;
-      const data = await fetchUazapi(url, token, "POST", { chatid: fullJid, limit: 50 });
+      const data = await fetchUazapi(url, tok, "POST", { chatid: fullJid, limit: 50 });
       const raw: any[] = Array.isArray(data) ? data : (data.messages || data.data || []);
       const normalized = raw.map(normalizeMessage);
 
-      // CRM messages (tenta ambos formatos)
       const rawPhone = fullJid.replace("@s.whatsapp.net", "").replace("@c.us", "");
       let clientData: { id: string } | null = null;
       for (const ph of [rawPhone, rawPhone.startsWith("55") ? rawPhone.slice(2) : `55${rawPhone}`]) {
@@ -374,7 +629,6 @@ export default function Chat() {
         setClientOpp(null);
       }
 
-      // Merge: WA messages prevalecem, CRM complementa
       const waIds = new Set(normalized.map(m => m.id));
       const merged = [...normalized, ...crmMsgs.filter(m => !waIds.has(m.id))];
       merged.sort((a, b) => {
@@ -396,29 +650,26 @@ export default function Chat() {
 
   // ---------- Fetch & save profile picture ----------
   const fetchAndSaveProfilePicture = useCallback(async (chat: WaChat) => {
-    if (!wpConfig || chat.avatar_url) return; // already have it
-    const token = wpConfig.instance_token || wpConfig.api_token;
+    if (!wpConfig || chat.avatar_url) return;
+    const tok = wpConfig.instance_token || wpConfig.api_token;
     const phone = chat.phone.startsWith("55") ? chat.phone : `55${chat.phone}`;
     try {
       const url = `${wpConfig.api_url.replace(/\/$/, "")}/contact/profilepicture`;
-      const data = await fetchUazapi(url, token, "POST", { number: phone });
+      const data = await fetchUazapi(url, tok, "POST", { number: phone });
       const picUrl: string | undefined =
         data?.profilePictureUrl || data?.imageUrl || data?.picture || data?.url;
       if (!picUrl) return;
-      // Update local state
       setWaChats(prev => prev.map(c => c.id === chat.id ? { ...c, avatar_url: picUrl } : c));
-      // Persist to Supabase if client exists in CRM
       if (chat.crm_client_id) {
         await supabase.from("clients").update({ avatar_url: picUrl } as any).eq("id", chat.crm_client_id);
       } else {
-        // Try to find client by phone and update
         const rawPhone = chat.phone;
         for (const ph of [rawPhone, rawPhone.startsWith("55") ? rawPhone.slice(2) : `55${rawPhone}`]) {
           const { data: cd } = await supabase.from("clients").select("id").eq("phone", ph).limit(1).maybeSingle();
           if (cd) { await supabase.from("clients").update({ avatar_url: picUrl } as any).eq("id", cd.id); break; }
         }
       }
-    } catch { /* silent — profile picture is optional */ }
+    } catch { /* silent */ }
   }, [wpConfig]);
 
   useEffect(() => {
@@ -430,21 +681,37 @@ export default function Chat() {
 
   // Auto-scroll
   useEffect(() => {
+    if (!showScrollDown) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [waMessages, showScrollDown]);
+
+  // Scroll detection
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distFromBottom > 150);
+  };
+
+  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [waMessages]);
+    setShowScrollDown(false);
+  };
 
   // ---------- Send text ----------
   const sendMessage = async () => {
-    const content = msg.trim();
+    const replyPrefix = replyTo ? `> ${replyTo.text.slice(0, 80)}\n\n` : "";
+    const content = (replyPrefix + msg).trim();
     if (!content || !activeChatId || !wpConfig) return;
     setMsg("");
+    setReplyTo(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
-    const token = wpConfig.instance_token || wpConfig.api_token;
+    const tok = wpConfig.instance_token || wpConfig.api_token;
     const phone = activeChatId.replace("@s.whatsapp.net", "").replace("@c.us", "");
     const formattedPhone = phone.startsWith("55") ? phone : `55${phone}`;
 
-    // Otimista
     const tempMsg: WaMessage = {
       id: `local-${Date.now()}`, from_me: true, text: content,
       timestamp: Math.floor(Date.now() / 1000), type: "text", source: "local",
@@ -453,9 +720,8 @@ export default function Chat() {
 
     try {
       const sendUrl = `${wpConfig.api_url.replace(/\/$/, "")}/send/text`;
-      await fetchUazapi(sendUrl, token, "POST", { number: formattedPhone, text: content });
+      await fetchUazapi(sendUrl, tok, "POST", { number: formattedPhone, text: content });
 
-      // Salva no CRM
       const activeChat = waChats.find(c => c.id === activeChatId);
       if (activeChat?.crm_client_id) {
         const { data: convData } = await supabase.from("conversations")
@@ -566,7 +832,6 @@ export default function Chat() {
     const activeChat = waChats.find(c => c.id === activeChatId);
     let clientId = activeChat?.crm_client_id;
 
-    // Tenta encontrar cliente pelos dois formatos de telefone
     if (!clientId && activeChatId) {
       const rawPhone = activeChatId.replace("@s.whatsapp.net", "").replace("@c.us", "");
       for (const ph of [rawPhone, rawPhone.startsWith("55") ? rawPhone.slice(2) : `55${rawPhone}`]) {
@@ -575,7 +840,6 @@ export default function Chat() {
       }
     }
 
-    // Se ainda não encontrou → cria o cliente automaticamente a partir dos dados do WhatsApp
     if (!clientId && activeChatId && activeChat) {
       const rawPhone = activeChatId.replace("@s.whatsapp.net", "").replace("@c.us", "");
       const { data: newClient, error: clientErr } = await supabase
@@ -589,7 +853,6 @@ export default function Chat() {
         .single();
       if (clientErr) { toast.error(`Erro ao criar cliente: ${clientErr.message}`); return; }
       clientId = newClient.id;
-      // Atualiza o chat local com o novo crm_client_id
       setWaChats(prev => prev.map(c => c.id === activeChatId ? { ...c, crm_client_id: clientId } : c));
       toast.success(`Lead "${activeChat.name}" adicionado ao CRM!`);
     }
@@ -605,7 +868,6 @@ export default function Chat() {
       if (error) { console.error(error); toast.error(`Erro: ${error.message}`); return; }
       toast.success("Etapa atualizada!");
       setClientOpp({ ...clientOpp, stage: newStage });
-      // Notifica o motor de follow-up
       fetch(`${PYTHON_BACKEND_URL}/followup/on-stage-change`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: clientId, opportunity_id: clientOpp.id, new_stage: newStage, old_stage: oldStage }),
@@ -621,7 +883,6 @@ export default function Chat() {
       if (error) { console.error(error); toast.error(`Erro: ${error.message}`); return; }
       toast.success("Lead adicionado ao CRM!");
       setClientOpp(data);
-      // Notifica o motor de follow-up
       fetch(`${PYTHON_BACKEND_URL}/followup/on-stage-change`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: clientId, opportunity_id: data.id, new_stage: newStage, old_stage: null }),
@@ -639,6 +900,38 @@ export default function Chat() {
     else { toast.success("Conversa criada!"); setNewConvOpen(false); setNewConvClientId(""); }
   };
 
+  // ---------- Voice recording ----------
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      recordingChunksRef.current = [];
+      mr.ondataavailable = e => { if (e.data.size > 0) recordingChunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, { type: "audio/webm" });
+        const file = new File([blob], `audio_${Date.now()}.webm`, { type: "audio/webm" });
+        sendMedia(file);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+    } catch {
+      toast.error("Permissão de microfone negada");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    setIsRecording(false);
+    setRecordingTime(0);
+  };
+
   // ---------- Computed ----------
   const activeChat = waChats.find(c => c.id === activeChatId);
   const activeClient = activeChat?.crm_client_id ? clients.find(c => c.id === activeChat.crm_client_id) : null;
@@ -646,9 +939,12 @@ export default function Chat() {
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone.includes(searchTerm)
   );
 
-  // Group messages by date
+  const filteredMessages = searchMsg
+    ? waMessages.filter(m => m.text?.toLowerCase().includes(searchMsg.toLowerCase()))
+    : waMessages;
+
   const groupedMessages: { label: string; msgs: WaMessage[] }[] = [];
-  waMessages.forEach(m => {
+  filteredMessages.forEach(m => {
     const label = getDateLabel(m.timestamp);
     const last = groupedMessages[groupedMessages.length - 1];
     if (!last || last.label !== label) groupedMessages.push({ label, msgs: [m] });
@@ -657,51 +953,16 @@ export default function Chat() {
 
   // ========== RENDER ==========
 
-  const renderMessageContent = (m: WaMessage) => {
-    const isMedia = ["imageMessage", "videoMessage"].includes(m.type || "");
-    const isAudio = ["audioMessage", "pttMessage"].includes(m.type || "");
-    const isDoc = m.type === "documentMessage";
-    const isSticker = m.type === "stickerMessage";
-    const isLocation = m.type === "locationMessage";
-
-    if (isMedia && m.media_url) return (
-      <div className="mb-1">
-        {m.type === "imageMessage"
-          ? <img src={m.media_url} alt="imagem" className="rounded-lg max-w-[240px] max-h-[200px] object-cover cursor-pointer" onClick={() => window.open(m.media_url)} />
-          : <video src={m.media_url} controls className="rounded-lg max-w-[240px]" />
-        }
-        {m.text && <p className="text-[13px] mt-1 whitespace-pre-wrap">{m.text}</p>}
-      </div>
-    );
-    if (isAudio && m.media_url) return <audio src={m.media_url} controls className="max-w-[220px] h-8" />;
-    if (isDoc) return (
-      <div className="flex items-center gap-2 p-2 bg-black/10 rounded-lg cursor-pointer" onClick={() => m.media_url && window.open(m.media_url)}>
-        <FileText className="h-4 w-4 shrink-0" />
-        <span className="text-[12px] truncate max-w-[180px]">{m.text || "Documento"}</span>
-      </div>
-    );
-    if (isLocation) return (
-      <div className="flex items-center gap-2 p-2 bg-black/10 rounded-lg">
-        <MapPin className="h-4 w-4 shrink-0" />
-        <span className="text-[12px]">{m.text || "Localização"}</span>
-      </div>
-    );
-    if (isSticker) return <span className="text-3xl">{m.text || "🎭"}</span>;
-    return <span className="text-[13.5px] leading-[1.4] whitespace-pre-wrap break-words">{m.text || msgTypePreview(m.type)}</span>;
-  };
-
   const renderSidebar = () => (
     <div className="flex flex-col h-full" style={{ background: "hsl(var(--card))" }}>
-      {/* Header */}
-      <div className="px-3 py-2.5 border-b border-border flex gap-2 items-center shrink-0">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input className="pl-8 h-8 bg-background text-[12.5px] border-border rounded-full"
-            placeholder="Buscar conversa..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-        </div>
+      {/* WA-style header */}
+      <div className="px-4 py-3 border-b border-border bg-emerald-600 flex items-center justify-between shrink-0">
+        <span className="text-white font-bold text-[16px] tracking-wide">WhatsApp</span>
         <Dialog open={newConvOpen} onOpenChange={setNewConvOpen}>
           <DialogTrigger asChild>
-            <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0"><Plus className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 text-white hover:bg-white/10">
+              <Plus className="h-4 w-4" />
+            </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Nova Conversa</DialogTitle></DialogHeader>
@@ -719,10 +980,19 @@ export default function Chat() {
         </Dialog>
       </div>
 
+      {/* Search */}
+      <div className="px-3 py-2 border-b border-border shrink-0">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input className="pl-8 h-8 bg-background text-[12.5px] border-border rounded-full"
+            placeholder="Buscar conversa..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
+      </div>
+
       {/* Status */}
       {wpConnected === true && (
         <div className="px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-medium text-emerald-500 border-b border-border bg-emerald-500/5 shrink-0">
-          <Wifi className="h-3 w-3" /> WhatsApp conectado — conversas em tempo real.
+          <Wifi className="h-3 w-3" /> Conectado
         </div>
       )}
       {wpConnected === false && (
@@ -735,8 +1005,16 @@ export default function Chat() {
       {/* Chat list */}
       <div className="flex-1 overflow-y-auto">
         {loadingChats && (
-          <div className="flex items-center justify-center py-12 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Carregando...
+          <div className="p-3 space-y-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-3 animate-pulse">
+                <div className="w-10 h-10 rounded-full bg-muted shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-muted rounded w-3/4" />
+                  <div className="h-2.5 bg-muted rounded w-1/2" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
         {chatError && (
@@ -749,8 +1027,11 @@ export default function Chat() {
           return (
             <div key={chat.id} onClick={() => { setActiveChatId(chat.id); if (isMobile) setShowMobileChat(true); }}
               className={`flex items-center gap-3 px-3 py-3 cursor-pointer border-b border-border/30 transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted/40"}`}>
-              {/* Avatar */}
-              <div className="w-10 h-10 rounded-full shrink-0 overflow-hidden bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center">
+              {/* Avatar with gradient fallback */}
+              <div
+                className="w-11 h-11 rounded-full shrink-0 overflow-hidden flex items-center justify-center"
+                style={{ background: chat.avatar_url ? undefined : nameToGradient(chat.name) }}
+              >
                 {chat.avatar_url
                   ? <img src={chat.avatar_url} alt={chat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   : <span className="text-white text-[12px] font-bold">{getInitials(chat.name)}</span>
@@ -785,6 +1066,110 @@ export default function Chat() {
     </div>
   );
 
+  const renderInput = () => (
+    <div className="px-3 py-2.5 border-t border-border bg-card shrink-0">
+      {/* Reply preview */}
+      {replyTo && (
+        <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-muted border-l-4 border-emerald-500">
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-semibold text-emerald-600 mb-0.5">
+              {replyTo.from_me ? "Você" : replyTo.contactName}
+            </div>
+            <div className="text-[12px] text-muted-foreground truncate">{replyTo.text}</div>
+          </div>
+          <button onClick={() => setReplyTo(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-end gap-2 relative">
+        <input type="file" ref={fileInputRef} className="hidden"
+          onChange={e => e.target.files?.[0] && sendMedia(e.target.files[0])} />
+
+        {/* Left actions */}
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "*/*"; fileInputRef.current.click(); } }} title="Anexo">
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*,video/*"; fileInputRef.current.click(); } }} title="Imagem/Vídeo">
+            <ImageIcon className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={sendLocation} title="Localização">
+            <MapPin className="h-4 w-4" />
+          </Button>
+          {/* Emoji button */}
+          <div className="relative">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setShowEmoji(v => !v)} title="Emoji">
+              <Smile className="h-4 w-4" />
+            </Button>
+            {showEmoji && (
+              <EmojiPicker
+                onSelect={e => setMsg(prev => prev + e)}
+                onClose={() => setShowEmoji(false)}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Recording UI */}
+        {isRecording ? (
+          <div className="flex-1 flex items-center gap-2 rounded-2xl border border-red-400 bg-red-50 dark:bg-red-950/20 px-3.5 py-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+            <span className="text-red-600 text-[13px] font-medium">{formatDuration(recordingTime)}</span>
+            <span className="text-red-400 text-[11px]">Gravando...</span>
+          </div>
+        ) : (
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            className="flex-1 resize-none rounded-2xl border border-border bg-background px-3.5 py-2 text-[13.5px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[36px] max-h-[120px] overflow-y-auto"
+            placeholder={isUploading ? "Enviando arquivo..." : "Digite uma mensagem..."}
+            value={msg}
+            disabled={isUploading}
+            onChange={e => {
+              setMsg(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+            }}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+          />
+        )}
+
+        {/* Right button: send / mic / stop */}
+        {isRecording ? (
+          <Button
+            size="icon"
+            className="h-9 w-9 shrink-0 rounded-full bg-red-500 hover:bg-red-600"
+            onClick={stopRecording}
+            title="Parar gravação"
+          >
+            <span className="w-3 h-3 rounded-sm bg-white" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            className="h-9 w-9 shrink-0 rounded-full"
+            onClick={msg.trim() ? sendMessage : startRecording}
+            disabled={isUploading}
+            title={msg.trim() ? "Enviar" : "Gravar áudio"}
+          >
+            {isUploading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : msg.trim()
+                ? <Send className="h-4 w-4" />
+                : <Mic className="h-4 w-4" />
+            }
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   const renderMessages = () => {
     if (!activeChatId) return (
       <div className="flex-1 flex items-center justify-center" style={{ background: "hsl(var(--background))" }}>
@@ -805,7 +1190,10 @@ export default function Chat() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
             )}
-            <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-chart-2/80 to-chart-1/80 flex items-center justify-center shrink-0">
+            <div
+              className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center shrink-0"
+              style={{ background: activeChat?.avatar_url ? undefined : nameToGradient(activeChat?.name || "?") }}
+            >
               {activeChat?.avatar_url
                 ? <img src={activeChat.avatar_url} alt={activeChat.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 : <span className="text-white text-xs font-bold">{getInitials(activeChat?.name || "?")}</span>
@@ -819,22 +1207,50 @@ export default function Chat() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Message search toggle */}
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={() => { setShowMsgSearch(v => !v); setSearchMsg(""); }} title="Buscar mensagens">
+              <Search className="h-4 w-4" />
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={deleteConversation} title="Apagar conversa">
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
+        {/* Message search bar */}
+        {showMsgSearch && (
+          <div className="px-4 py-2 border-b border-border bg-muted/30 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                className="pl-8 h-8 text-[12.5px] rounded-full"
+                placeholder="Buscar nas mensagens..."
+                value={searchMsg}
+                onChange={e => setSearchMsg(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+        )}
+
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1"
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+          className="flex-1 overflow-y-auto px-4 py-3 space-y-1 relative"
           style={{
             background: "hsl(var(--background))",
             backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none'%3E%3Cg fill='%239C92AC' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
           }}
         >
           {loadingMessages && (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin mr-2" /> Carregando mensagens...
+            <div className="space-y-3 py-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"} animate-pulse`}>
+                  <div className={`h-10 rounded-2xl bg-muted ${i % 2 === 0 ? "w-48" : "w-36"}`} />
+                </div>
+              ))}
             </div>
           )}
 
@@ -846,7 +1262,6 @@ export default function Chat() {
 
           {groupedMessages.map(group => (
             <div key={group.label}>
-              {/* Date divider */}
               <div className="flex items-center justify-center my-3">
                 <span className="text-[11px] font-medium px-3 py-0.5 rounded-full bg-card border border-border text-muted-foreground shadow-sm">
                   {group.label}
@@ -858,11 +1273,18 @@ export default function Chat() {
                 const prevMsg = idx > 0 ? group.msgs[idx - 1] : null;
                 const isConsecutive = prevMsg?.from_me === m.from_me;
 
+                // Heurística de leitura: mensagem com mais de 1 minuto
+                const msgDate = tsToDate(m.timestamp);
+                const isRead = msgDate ? (Date.now() - msgDate.getTime()) > 60_000 : false;
+
                 return (
                   <div key={m.id} className={`flex group ${isMe ? "justify-end" : "justify-start"} ${isConsecutive ? "mt-0.5" : "mt-2"}`}>
-                    {/* Avatar for received (only on first of a sequence) */}
+                    {/* Avatar for received */}
                     {!isMe && !isConsecutive && (
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-chart-2/60 to-chart-1/60 flex items-center justify-center text-white text-[9px] font-bold shrink-0 mr-1.5 mt-auto mb-0.5">
+                      <div
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0 mr-1.5 mt-auto mb-0.5"
+                        style={{ background: nameToGradient(activeChat?.name || "?") }}
+                      >
                         {getInitials(activeChat?.name || "?")}
                       </div>
                     )}
@@ -871,24 +1293,46 @@ export default function Chat() {
                     <div className={`relative max-w-[72%] ${isMe ? "items-end" : "items-start"}`}>
                       {/* Bot label */}
                       {isBot && (
-                        <div className="text-[10px] font-semibold mb-0.5 text-chart-3 flex items-center gap-1">
-                          <Bot className="h-3 w-3" /> Bot
+                        <div className="text-[10px] font-semibold mb-0.5 text-purple-500 flex items-center gap-1">
+                          <Bot className="h-3 w-3" /> 🤖 Bot
                         </div>
                       )}
+
+                      {/* Reply button on hover */}
+                      <button
+                        className={`absolute top-1 ${isMe ? "-left-8" : "-right-8"} opacity-0 group-hover:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-foreground`}
+                        onClick={() => setReplyTo({
+                          id: m.id,
+                          from_me: m.from_me,
+                          text: m.text || msgTypePreview(m.type),
+                          contactName: activeChat?.name || "Contato",
+                        })}
+                        title="Responder"
+                      >
+                        <CornerUpLeft className="h-3.5 w-3.5" />
+                      </button>
+
                       {/* Bubble */}
                       <div className={`relative px-3 py-[6px] rounded-2xl shadow-sm ${
                         isMe
                           ? "bg-primary text-primary-foreground rounded-br-sm"
                           : "bg-card border border-border/60 text-foreground rounded-bl-sm"
                       }`}>
-                        <MessageContent msg={m} />
+                        <MessageContent
+                          msg={m}
+                          token={token}
+                          contactName={activeChat?.name || "Contato"}
+                          onImageClick={(src) => setLightboxSrc(src)}
+                        />
                         {/* Time + status */}
                         <div className={`flex items-center gap-1 justify-end mt-0.5 ${isMe ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                           <span className="text-[10px]">{formatMsgTime(m.timestamp)}</span>
                           {isMe && (
                             m.source === "local"
                               ? <Check className="h-3 w-3 opacity-60" />
-                              : <CheckCheck className="h-3 w-3 opacity-80" />
+                              : isRead
+                                ? <CheckCheck className="h-3 w-3 text-blue-400" />
+                                : <CheckCheck className="h-3 w-3 opacity-60" />
                           )}
                         </div>
                         {/* Delete on hover */}
@@ -910,51 +1354,17 @@ export default function Chat() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div className="px-3 py-2.5 border-t border-border bg-card shrink-0">
-          <div className="flex items-end gap-2">
-            <input type="file" ref={fileInputRef} className="hidden"
-              onChange={e => e.target.files?.[0] && sendMedia(e.target.files[0])} />
+        {/* Scroll to bottom button */}
+        {showScrollDown && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-20 right-6 w-9 h-9 rounded-full bg-card border border-border shadow-md flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors z-10"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        )}
 
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "*/*"; fileInputRef.current.click(); } }} title="Anexo">
-                <Paperclip className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*,video/*"; fileInputRef.current.click(); } }} title="Imagem/Vídeo">
-                <ImageIcon className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={sendLocation} title="Localização">
-                <MapPin className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              className="flex-1 resize-none rounded-2xl border border-border bg-background px-3.5 py-2 text-[13.5px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[36px] max-h-[120px] overflow-y-auto"
-              placeholder={isUploading ? "Enviando arquivo..." : "Digite uma mensagem..."}
-              value={msg}
-              disabled={isUploading}
-              onChange={e => {
-                setMsg(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
-              }}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-            />
-
-            <Button size="icon"
-              className="h-9 w-9 shrink-0 rounded-full"
-              onClick={sendMessage}
-              disabled={(!msg.trim() && !isUploading) || isUploading}
-            >
-              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : msg.trim() ? <Send className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </Button>
-          </div>
-        </div>
+        {renderInput()}
       </div>
     );
   };
@@ -964,8 +1374,14 @@ export default function Chat() {
     return (
       <div className="w-[220px] border-l border-border bg-card flex flex-col hidden lg:flex shrink-0">
         <div className="p-4 border-b border-border text-center">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-chart-2/80 to-chart-1/80 mx-auto mb-2 flex items-center justify-center text-white font-bold text-lg">
-            {getInitials(activeChat.name)}
+          <div
+            className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-white font-bold text-lg overflow-hidden"
+            style={{ background: activeChat.avatar_url ? undefined : nameToGradient(activeChat.name) }}
+          >
+            {activeChat.avatar_url
+              ? <img src={activeChat.avatar_url} alt={activeChat.name} className="w-full h-full object-cover" />
+              : getInitials(activeChat.name)
+            }
           </div>
           <div className="text-foreground font-bold text-sm leading-tight">{activeChat.name}</div>
           <div className="text-muted-foreground text-[11px] mt-0.5">{activeChat.phone}</div>
@@ -1011,7 +1427,12 @@ export default function Chat() {
 
   // ─── Main layout ─────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-60px)] overflow-hidden animate-fade-in">
+    <div className="flex h-[calc(100vh-60px)] overflow-hidden animate-fade-in relative">
+      {/* Lightbox */}
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      )}
+
       {/* Sidebar */}
       {(!isMobile || !showMobileChat) && (
         <div className={`${isMobile ? "w-full" : "w-[300px]"} border-r border-border flex flex-col shrink-0`}>
@@ -1021,7 +1442,7 @@ export default function Chat() {
 
       {/* Messages */}
       {(!isMobile || showMobileChat) && (
-        <div className="flex-1 flex min-w-0">
+        <div className="flex-1 flex min-w-0 relative">
           {renderMessages()}
           {!isMobile && renderContactPanel()}
         </div>
