@@ -284,7 +284,23 @@ export default function FollowUp() {
     }
     setSaving(step.id);
     try {
-      await apiFetch(`/followup/config/${step.id}/messages`, "PUT", msgs);
+      // Salva direto no Supabase — evita dependência do backend Python para CRUD simples
+      const { error: delError } = await supabase
+        .from("stage_followup_messages")
+        .delete()
+        .eq("step_id", step.id);
+      if (delError) throw new Error(delError.message);
+
+      const rows = msgs.map((message, i) => ({
+        step_id: step.id,
+        variation_number: i + 1,
+        message: message.trim(),
+      }));
+      const { error: insError } = await supabase
+        .from("stage_followup_messages")
+        .insert(rows);
+      if (insError) throw new Error(insError.message);
+
       toast.success(`Step ${step.step_number} de "${STAGE_LABELS[step.stage]}" salvo com ${msgs.length} variações!`);
       load();
     } catch (e: any) {
