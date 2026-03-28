@@ -357,8 +357,27 @@ async def receive_whatsapp_message(request: Request):
                 }).execute()
                 logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
             except Exception as e:
+                err_str = str(e).lower()
+                # ─── Detecção de UNIQUE violation ───────────────────────────────
+                # Se o INSERT falhou por duplicata de provider_message_id (UNIQUE constraint),
+                # significa que outro webhook já processou esta mensagem em paralelo.
+                # NÃO fazemos fallback — interrompe imediatamente para evitar:
+                #   1. Criar schedules de follow-up duplicados
+                #   2. Disparar Jarvis duplicado
+                #   3. Criar oportunidade duplicada
+                is_duplicate = any(kw in err_str for kw in [
+                    "duplicate", "unique", "23505", "already exists", "violates"
+                ])
+                if is_duplicate:
+                    logger.info(
+                        "Webhook duplicado detectado via UNIQUE constraint — "
+                        "abortando processamento de %s para evitar duplicatas", phone
+                    )
+                    return {"status": "ignored", "reason": "mensagem duplicada (constraint db)"}
+
                 logger.error("Erro ao salvar mensagem (colunas faltando? rode a migration): %s", e)
-                # Tenta inserir só com colunas originais como fallback
+                # Fallback apenas para erros NÃO relacionados a duplicatas
+                # (ex: coluna não existe — migration pendente)
                 try:
                     db.table("messages").insert({
                         "conversation_id": conversation_id,

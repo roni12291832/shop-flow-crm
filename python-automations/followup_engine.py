@@ -161,6 +161,26 @@ async def on_stage_change(
             )
             continue
 
+        # ─── Guarda de duplicata ─────────────────────────────────────────────
+        # Verifica se já existe um schedule ativo (pending/processing) para esta opp+step.
+        # Isso previne duplicatas quando on_stage_change é chamado concorrentemente
+        # (ex: duas requisições de webhook simultâneas para o mesmo lead).
+        existing_res = (
+            db.table("stage_followup_schedules")
+            .select("id")
+            .eq("opportunity_id", opportunity_id)
+            .eq("step_id", step["id"])
+            .in_("status", ["pending", "processing"])
+            .limit(1)
+            .execute()
+        )
+        if existing_res.data:
+            logger.info(
+                "Schedule já existe para opp %s step %d — pulando (evita duplicata)",
+                opportunity_id, step["step_number"],
+            )
+            continue
+
         # Busca variação já usada por este cliente neste step
         used_res = (
             db.table("stage_followup_schedules")
@@ -371,14 +391,18 @@ async def _recover_stuck_processing(db) -> int:
     """
     Recupera schedules travados em 'processing' há mais de 10 minutos.
     Isso acontece quando o servidor reinicia (Koyeb redeploy) durante o processamento.
-    Devolve os registros para 'pending' para serem reprocessados no próximo ciclo.
+
+    IMPORTANTE: marca como 'failed' em vez de 'pending' para NÃO re-enviar.
+    Não temos como saber se a mensagem já foi enviada ao WhatsApp antes do crash —
+    re-enviar geraria duplicatas. Um humano pode rever e reativar manualmente se necessário.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     try:
         res = (
             db.table("stage_followup_schedules")
             .update({
-                "status": "pending",
+                "status": "failed",
+                "cancel_reason": "redeploy_durante_processamento",
                 "processing_started_at": None,
             })
             .eq("status", "processing")
@@ -388,7 +412,7 @@ async def _recover_stuck_processing(db) -> int:
         recovered = len(res.data or [])
         if recovered:
             logger.warning(
-                "Recuperados %d schedules travados em 'processing' (provavelmente redeploy)",
+                "Marcados %d schedules como 'failed' (travados por redeploy — não reenviados para evitar duplicatas)",
                 recovered,
             )
         return recovered
