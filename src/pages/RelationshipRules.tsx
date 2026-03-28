@@ -81,10 +81,44 @@ export default function RelationshipRules() {
     toast.success(active ? "Régua ativada" : "Régua desativada");
   };
 
-  // ─── Save (cria ou atualiza régua + variações) ─────────────────────────────
+  // ─── Upload de mídia para Supabase Storage ────────────────────────────────
+
+  const uploadPendingMedia = async (pendingMedia: RuleFormData["pendingMedia"]): Promise<string[]> => {
+    const uploaded: string[] = [];
+    for (const item of pendingMedia) {
+      try {
+        const ext = item.file.name.split(".").pop()?.toLowerCase() || (item.type === "video" ? "mp4" : "jpg");
+        const path = `rule-media/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error } = await supabase.storage.from("rule-media").upload(path, item.file, {
+          contentType: item.file.type,
+          upsert: false,
+        });
+        if (error) {
+          toast.warning(`Falha ao enviar "${item.file.name}": ${error.message}`);
+          continue;
+        }
+        const { data: { publicUrl } } = supabase.storage.from("rule-media").getPublicUrl(path);
+        uploaded.push(publicUrl);
+      } catch (e) {
+        toast.warning(`Erro ao enviar mídia: ${e}`);
+      }
+    }
+    return uploaded;
+  };
+
+  // ─── Save (cria ou atualiza régua + variações + mídia) ────────────────────
 
   const handleSave = async (data: RuleFormData) => {
-    const { variations, ...ruleData } = data;
+    const { variations, pendingMedia, ...ruleData } = data;
+
+    // 1. Upload de mídias pendentes (novas fotos/vídeo)
+    let allMediaUrls = [...(ruleData.media_urls || [])];
+    if (pendingMedia && pendingMedia.length > 0) {
+      toast.info(`Enviando ${pendingMedia.length} arquivo(s)...`);
+      const newUrls = await uploadPendingMedia(pendingMedia);
+      allMediaUrls = [...allMediaUrls, ...newUrls];
+    }
+    ruleData.media_urls = allMediaUrls;
 
     let ruleId: string | null = null;
 
@@ -158,7 +192,7 @@ export default function RelationshipRules() {
       // Fallback: pega do message_template com |||
       variations = (rule.message_template || "").split("|||").map((s: string) => s.trim()).filter(Boolean);
     }
-    setEditingRule({ ...rule, variations });
+    setEditingRule({ ...rule, variations, media_urls: rule.media_urls || [], pendingMedia: [] });
     setWizardOpen(true);
   };
 

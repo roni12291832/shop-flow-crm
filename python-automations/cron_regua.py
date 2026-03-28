@@ -168,11 +168,86 @@ def _personalize(message: str, client: dict) -> str:
     return message
 
 
+# ─── Helpers de mídia ─────────────────────────────────────────────────────────
+
+def _get_media_urls(rule: dict) -> list[str]:
+    """Retorna lista de URLs de mídia da regra (campo media_urls do banco)."""
+    raw = rule.get("media_urls") or []
+    if isinstance(raw, str):
+        import json
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    return [u for u in raw if isinstance(u, str) and u.startswith("http")]
+
+
+def _is_video_url(url: str) -> bool:
+    return bool(url and url.lower().split("?")[0].rsplit(".", 1)[-1] in ("mp4", "mov", "avi", "webm", "mkv"))
+
+
+async def _send_with_media(
+    phone: str,
+    text: str,
+    media_urls: list[str],
+    wp_config: dict,
+) -> bool | str:
+    """
+    Envia mídia + texto.
+
+    Lógica:
+      - 1 vídeo → envia vídeo com texto como legenda
+      - 1 foto  → envia foto com texto como legenda
+      - 2–4 fotos → envia 1ª foto com legenda; demais fotos sem legenda (delay 2–5s)
+
+    Retorna True (sucesso), False (falha) ou str com error_code crítico.
+    """
+    token = wp_config.get("instance_token") or wp_config["api_token"]
+    api_url = wp_config["api_url"]
+    api_token = wp_config["api_token"]
+
+    first_url = media_urls[0]
+    media_type = "video" if _is_video_url(first_url) else "image"
+
+    # Envia primeiro item com legenda
+    resp = await uazapi.send_media(
+        api_url=api_url,
+        api_token=api_token,
+        phone=phone,
+        media_type=media_type,
+        file=first_url,
+        text=text,
+        instance_token=token,
+    )
+    error_code = resp.get("error_code") if "error" in resp else None
+    if error_code in ("rate_limit", "auth_error"):
+        return error_code
+
+    result_ok = "error" not in resp
+
+    # Fotos adicionais (sem legenda)
+    for extra_url in media_urls[1:]:
+        await asyncio.sleep(random.randint(2, 5))
+        resp2 = await uazapi.send_media(
+            api_url=api_url,
+            api_token=api_token,
+            phone=phone,
+            media_type="image",
+            file=extra_url,
+            instance_token=token,
+        )
+        ec2 = resp2.get("error_code") if "error" in resp2 else None
+        if ec2 in ("rate_limit", "auth_error"):
+            return ec2  # para o loop imediatamente
+
+    return result_ok
+
+
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 async def _dispatch(rule: dict, client: dict, variations: list[str], wp_config: dict, db) -> bool | str:
     """
-    Envia uma variação aleatória para o cliente.
+    Envia uma variação aleatória (+ mídia se houver) para o cliente.
     Retorna True (sucesso), False (falha), ou str com código de erro crítico.
     """
     phone = client.get("phone", "")
@@ -182,29 +257,45 @@ async def _dispatch(rule: dict, client: dict, variations: list[str], wp_config: 
 
     variation = random.choice(variations)
     personalized = _personalize(variation, client)
+    media_urls = _get_media_urls(rule)
 
     if DRY_RUN:
-        logger.info("[DRY_RUN] Para %s: %.70s...", client.get("name"), personalized)
+        media_info = f" + {len(media_urls)} mídia(s)" if media_urls else ""
+        logger.info("[DRY_RUN] Para %s: %.70s...%s", client.get("name"), personalized, media_info)
         result_ok = True
         error_code = None
     else:
-        resp = await uazapi.send_text(
-            api_url=wp_config["api_url"],
-            api_token=wp_config["api_token"],
-            instance_name=wp_config["instance_name"],
-            phone=phone,
-            message=personalized,
-            instance_token=wp_config.get("instance_token"),
-        )
-        error_code = resp.get("error_code") if "error" in resp else None
-        result_ok = "error" not in resp
-
-        if error_code in ("rate_limit", "auth_error"):
-            logger.warning(
-                "Régua '%s': erro %s para %s — interrompendo",
-                rule["name"], error_code, client.get("name"),
+        if media_urls:
+            # Envia mídia com o texto como legenda
+            result = await _send_with_media(
+                phone=phone,
+                text=personalized,
+                media_urls=media_urls,
+                wp_config=wp_config,
             )
-            return error_code  # sinaliza para parar o loop
+            if isinstance(result, str):  # error_code
+                return result
+            result_ok = bool(result)
+            error_code = None
+        else:
+            # Só texto
+            resp = await uazapi.send_text(
+                api_url=wp_config["api_url"],
+                api_token=wp_config["api_token"],
+                instance_name=wp_config["instance_name"],
+                phone=phone,
+                message=personalized,
+                instance_token=wp_config.get("instance_token"),
+            )
+            error_code = resp.get("error_code") if "error" in resp else None
+            result_ok = "error" not in resp
+
+            if error_code in ("rate_limit", "auth_error"):
+                logger.warning(
+                    "Régua '%s': erro %s para %s — interrompendo",
+                    rule["name"], error_code, client.get("name"),
+                )
+                return error_code
 
     # Registra execução
     try:

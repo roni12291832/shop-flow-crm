@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,16 +9,24 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Heart, ShoppingBag, ArrowLeft, ArrowRight, Check,
-  Sparkles, Trash2, Plus, Calendar, Clock, Info,
-  AlertCircle, CheckCircle2, Loader2,
+  Sparkles, Trash2, Plus, Info, AlertCircle, CheckCircle2,
+  Loader2, Image, Video, Upload, X, Film,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const PYTHON_BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const MIN_VARIATIONS = 15;
+const MAX_PHOTOS = 4;
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
+
+/** Arquivo de mídia pendente de upload (só existe na memória do wizard) */
+export interface PendingMedia {
+  file: File;
+  preview: string;  // object URL para preview
+  type: "image" | "video";
+}
 
 export interface RuleFormData {
   name: string;
@@ -29,6 +37,8 @@ export interface RuleFormData {
   campaign_start: string;   // ISO datetime string
   campaign_end: string;     // ISO datetime string
   variations: string[];     // as 15 variações
+  media_urls: string[];     // URLs públicas já salvas (do Supabase Storage)
+  pendingMedia: PendingMedia[];  // arquivos ainda não enviados
 }
 
 interface RuleWizardProps {
@@ -93,7 +103,9 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
     return d.toISOString();
   };
 
-  const [form, setForm] = useState<RuleFormData>({
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const emptyForm = (): RuleFormData => ({
     name: initialData?.name || "",
     trigger_event: initialData?.trigger_event || "birthday",
     channel: "whatsapp",
@@ -102,7 +114,11 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
     campaign_start: initialData?.campaign_start || defaultStart(),
     campaign_end: initialData?.campaign_end || defaultEnd(),
     variations: initialData?.variations || [],
+    media_urls: initialData?.media_urls || [],
+    pendingMedia: [],
   });
+
+  const [form, setForm] = useState<RuleFormData>(emptyForm);
 
   // Base message para enviar ao Jarvis
   const [baseMessage, setBaseMessage] = useState(
@@ -120,12 +136,82 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
         campaign_start: initialData.campaign_start || defaultStart(),
         campaign_end: initialData.campaign_end || defaultEnd(),
         variations: initialData.variations || [],
+        media_urls: initialData.media_urls || [],
+        pendingMedia: [],
       });
       const base = initialData.message_template?.split("|||")[0]?.trim() || "";
       setBaseMessage(base);
       setStep(1);
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Media handlers ───────────────────────────────────────────────────────
+
+  const hasVideo = form.pendingMedia.some(m => m.type === "video")
+    || form.media_urls.some(u => /\.(mp4|mov|avi|webm|mkv)$/i.test(u));
+
+  const totalMediaCount = form.media_urls.length + form.pendingMedia.length;
+
+  const handleMediaSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const newMedia: PendingMedia[] = [];
+
+    for (const file of Array.from(files)) {
+      const isVideo = file.type.startsWith("video/");
+      const isImage = file.type.startsWith("image/");
+
+      if (!isVideo && !isImage) {
+        toast.error(`Arquivo "${file.name}" não é imagem ou vídeo`);
+        continue;
+      }
+
+      // Regras:
+      // - Se já tem vídeo → não adiciona mais nada
+      // - Se está adicionando vídeo → só se não houver nada ainda
+      // - Máximo de 4 fotos
+
+      if (hasVideo) {
+        toast.warning("Já existe um vídeo. Remova-o para adicionar outra mídia.");
+        break;
+      }
+
+      if (isVideo) {
+        if (totalMediaCount + newMedia.length > 0) {
+          toast.warning("Para adicionar vídeo, remova todas as fotos primeiro.");
+          break;
+        }
+        newMedia.push({ file, preview: URL.createObjectURL(file), type: "video" });
+        break; // só 1 vídeo
+      }
+
+      if (isImage) {
+        const currentPhotos = form.media_urls.filter(u => !/\.(mp4|mov|avi|webm|mkv)$/i.test(u)).length
+          + form.pendingMedia.filter(m => m.type === "image").length
+          + newMedia.filter(m => m.type === "image").length;
+
+        if (currentPhotos >= MAX_PHOTOS) {
+          toast.warning(`Máximo de ${MAX_PHOTOS} fotos atingido.`);
+          break;
+        }
+        newMedia.push({ file, preview: URL.createObjectURL(file), type: "image" });
+      }
+    }
+
+    if (newMedia.length > 0) {
+      update("pendingMedia", [...form.pendingMedia, ...newMedia]);
+    }
+  };
+
+  const removePendingMedia = (idx: number) => {
+    const removed = form.pendingMedia[idx];
+    URL.revokeObjectURL(removed.preview);
+    update("pendingMedia", form.pendingMedia.filter((_, i) => i !== idx));
+  };
+
+  const removeSavedMedia = (url: string) => {
+    update("media_urls", form.media_urls.filter(u => u !== url));
+  };
 
   const update = <K extends keyof RuleFormData>(key: K, value: RuleFormData[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -202,6 +288,8 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
         ...form,
         variations: form.variations.filter(v => v.trim().length > 0),
       });
+      // Limpa object URLs antes de resetar
+      form.pendingMedia.forEach(m => URL.revokeObjectURL(m.preview));
       // Reset
       setStep(1);
       setBaseMessage("");
@@ -214,6 +302,8 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
         campaign_start: defaultStart(),
         campaign_end: defaultEnd(),
         variations: [],
+        media_urls: [],
+        pendingMedia: [],
       });
     } finally {
       setSaving(false);
@@ -485,6 +575,126 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
                 <p className="text-xs mt-1">ou adicione variações manualmente</p>
               </div>
             )}
+
+            {/* ─── Seção de Mídia ─── */}
+            <div className="border-t border-border/50 pt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-foreground">Fotos ou Vídeo</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Opcional. Até 4 fotos <strong>ou</strong> 1 vídeo — enviados junto com a mensagem.
+                  </p>
+                </div>
+                <Badge variant="secondary" className="text-[10px] shrink-0">
+                  {totalMediaCount}/{hasVideo ? "1 vídeo" : `${MAX_PHOTOS} fotos`}
+                </Badge>
+              </div>
+
+              {/* Preview das mídias já salvas + pendentes */}
+              {(form.media_urls.length > 0 || form.pendingMedia.length > 0) && (
+                <div className="grid grid-cols-4 gap-2">
+                  {/* URLs já salvas no banco */}
+                  {form.media_urls.map((url, i) => {
+                    const isVid = /\.(mp4|mov|avi|webm|mkv)$/i.test(url);
+                    return (
+                      <div key={`saved-${i}`} className="relative group aspect-square">
+                        {isVid ? (
+                          <div className="w-full h-full bg-muted rounded-lg flex flex-col items-center justify-center border border-border">
+                            <Film className="h-6 w-6 text-muted-foreground" />
+                            <span className="text-[9px] text-muted-foreground mt-1">Vídeo</span>
+                          </div>
+                        ) : (
+                          <img src={url} alt="" className="w-full h-full object-cover rounded-lg border border-border" />
+                        )}
+                        <button
+                          onClick={() => removeSavedMedia(url)}
+                          className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Arquivos pendentes (ainda não enviados) */}
+                  {form.pendingMedia.map((media, i) => (
+                    <div key={`pending-${i}`} className="relative group aspect-square">
+                      {media.type === "video" ? (
+                        <div className="w-full h-full bg-muted rounded-lg flex flex-col items-center justify-center border border-border border-dashed">
+                          <Film className="h-6 w-6 text-primary" />
+                          <span className="text-[9px] text-muted-foreground mt-1">{media.file.name.slice(0, 12)}</span>
+                        </div>
+                      ) : (
+                        <img src={media.preview} alt="" className="w-full h-full object-cover rounded-lg border border-border" />
+                      )}
+                      {/* Badge "novo" */}
+                      <span className="absolute bottom-0.5 left-0.5 bg-primary text-primary-foreground text-[8px] px-1 rounded">novo</span>
+                      <button
+                        onClick={() => removePendingMedia(i)}
+                        className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Slot de adicionar (se ainda cabe) */}
+                  {!hasVideo && totalMediaCount < MAX_PHOTOS && (
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="aspect-square border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                    >
+                      <Plus className="h-5 w-5 text-muted-foreground" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Botão de upload quando não há nada */}
+              {totalMediaCount === 0 && (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-border rounded-lg py-6 flex flex-col items-center gap-2 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                >
+                  <div className="flex gap-3">
+                    <Image className="h-6 w-6 text-muted-foreground" />
+                    <Video className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Clique para selecionar fotos ou vídeo
+                  </p>
+                  <p className="text-xs text-muted-foreground opacity-70">
+                    Até 4 fotos (JPG, PNG, WebP) <strong>ou</strong> 1 vídeo (MP4, MOV)
+                  </p>
+                </button>
+              )}
+
+              {/* Input escondido */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/x-msvideo,video/webm"
+                multiple={!hasVideo && totalMediaCount < MAX_PHOTOS}
+                className="hidden"
+                onChange={e => handleMediaSelect(e.target.files)}
+                onClick={e => { (e.target as HTMLInputElement).value = ""; }}
+              />
+
+              {/* Info de como a mídia é enviada */}
+              {totalMediaCount > 0 && (
+                <div className="flex items-start gap-2 p-2.5 bg-blue-500/5 border border-blue-500/20 rounded-md text-[11px] text-muted-foreground">
+                  <Info className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
+                  <p>
+                    {hasVideo
+                      ? "O vídeo será enviado com a mensagem como legenda."
+                      : form.media_urls.length + form.pendingMedia.length === 1
+                        ? "A foto será enviada com a mensagem como legenda."
+                        : `A 1ª foto terá a mensagem como legenda. As demais (${totalMediaCount - 1}) são enviadas em seguida com intervalo de 2–5s.`
+                    }
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -565,6 +775,23 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
                 </div>
               </div>
 
+              {/* Mídia */}
+              {(form.media_urls.length > 0 || form.pendingMedia.length > 0) && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1.5">Mídia</p>
+                  <div className="flex items-center gap-2">
+                    {form.pendingMedia.some(m => m.type === "video") || form.media_urls.some(u => /\.(mp4|mov|avi|webm|mkv)$/i.test(u))
+                      ? <Film className="h-4 w-4 text-blue-500" />
+                      : <Image className="h-4 w-4 text-blue-500" />
+                    }
+                    <span className="text-xs text-foreground">
+                      {hasVideo ? "1 vídeo" : `${totalMediaCount} foto${totalMediaCount > 1 ? "s" : ""}`}
+                      {form.pendingMedia.length > 0 && ` (${form.pendingMedia.length} novo${form.pendingMedia.length > 1 ? "s" : ""})`}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Regras de envio */}
               {form.trigger_event === "no_purchase" && (
                 <div className="bg-amber-500/10 rounded p-2 border border-amber-500/20">
@@ -575,6 +802,9 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
                     <li>• Delay aleatório de 1–3 min entre mensagens</li>
                     <li>• Cada comprador recebe variação diferente</li>
                     <li>• Nunca envia no domingo</li>
+                    {(form.media_urls.length + form.pendingMedia.length) > 0 && (
+                      <li>• {hasVideo ? "Vídeo" : `${totalMediaCount} foto${totalMediaCount > 1 ? "s" : ""}`} enviado{hasVideo ? "" : "s"} junto com a mensagem</li>
+                    )}
                   </ul>
                 </div>
               )}
