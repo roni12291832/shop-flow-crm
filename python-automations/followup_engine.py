@@ -441,6 +441,23 @@ async def job_process_followups() -> None:
                         )
                         continue
 
+                # ─── Lock otimista ────────────────────────────────────────────
+                # Tenta marcar como "processing" com double-check no status.
+                # Se outro processo já pegou este schedule, o UPDATE retorna 0 linhas.
+                lock_res = (
+                    db.table("stage_followup_schedules")
+                    .update({
+                        "status": "processing",
+                        "processing_started_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    .eq("id", sched["id"])
+                    .eq("status", "pending")  # só atualiza se ainda estiver pending
+                    .execute()
+                )
+                if not lock_res.data:
+                    logger.info("Schedule %s já processado por outro processo — pulando", sched["id"])
+                    continue
+
                 client_res = (
                     db.table("clients").select("id, name, phone").eq("id", sched["client_id"]).limit(1).execute()
                 )
@@ -489,7 +506,23 @@ async def job_process_followups() -> None:
                         )
                         if "error" in resp:
                             status = "failed"
+                            error_code = resp.get("error_code", "unknown")
                             error = str(resp["error"])
+                            logger.error("Follow-up falhou para %s: %s (%s)", phone, error, error_code)
+
+                            # Reação específica por tipo de erro
+                            if error_code == "rate_limit":
+                                logger.warning("Rate limit UAZAPI — interrompendo batch de follow-up")
+                                db.table("stage_followup_schedules").update({
+                                    "status": "pending",  # devolve para fila
+                                }).eq("id", sched["id"]).execute()
+                                break  # para o loop inteiro
+                            elif error_code == "auth_error":
+                                await alertar_dono("⚠️ Token WhatsApp inválido! Follow-up interrompido. Reconecte a instância no CRM.")
+                                break
+                            elif error_code == "not_found":
+                                # Número inválido — cancela todos follow-ups deste cliente
+                                await cancel_pending_for_client(client["id"], "numero_invalido_uazapi")
                         else:
                             logger.info("Follow-up step %d '%s' enviado para %s (%s)", sched["step_number"], stage, client["name"], phone)
                     except Exception as e:
@@ -498,10 +531,12 @@ async def job_process_followups() -> None:
                         logger.error("Exceção no follow-up para %s: %s", phone, e)
 
                 sent_at = datetime.now(timezone.utc).isoformat()
+                # Atualiza status final (sai de "processing" para "sent" ou "failed")
                 db.table("stage_followup_schedules").update({
                     "status": status,
                     "sent_at": sent_at if status == "sent" else None,
                     "cancel_reason": error if status == "failed" else None,
+                    "processing_started_at": None,
                 }).eq("id", sched["id"]).execute()
 
                 # Atualiza contador local por step para respeitar limite durante este job

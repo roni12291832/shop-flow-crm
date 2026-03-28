@@ -20,6 +20,30 @@ import logging
 logger = logging.getLogger("uazapi")
 
 
+_HTTP_ERROR_MAP = {
+    401: ("auth_error",   "Token inválido ou expirado — reconecte a instância"),
+    403: ("forbidden",    "Sem permissão para esta operação"),
+    404: ("not_found",    "Número não encontrado no WhatsApp"),
+    429: ("rate_limit",   "Limite de envios atingido — aguardar antes de continuar"),
+    500: ("server_error", "Erro interno da UAZAPI"),
+    503: ("unavailable",  "UAZAPI temporariamente indisponível"),
+}
+
+
+def _structured_error(e: httpx.HTTPStatusError, phone: str = "") -> dict:
+    """Retorna erro estruturado com error_code para tratamento preciso no chamador."""
+    code, description = _HTTP_ERROR_MAP.get(
+        e.response.status_code,
+        ("http_error", f"HTTP {e.response.status_code}"),
+    )
+    logger.error("UAZAPI %s para %s: %s", code, phone, e.response.text[:200])
+    return {
+        "error":       description,
+        "error_code":  code,
+        "status_code": e.response.status_code,
+    }
+
+
 class UazapiClient:
     """Cliente assíncrono para a UAZAPI GO V2."""
 
@@ -57,14 +81,10 @@ class UazapiClient:
                 logger.info(f"Mensagem enviada para {phone}")
                 return resp.json()
             except httpx.HTTPStatusError as e:
-                logger.error(
-                    f"Erro HTTP ao enviar para {phone}: {e.response.status_code} - {e.response.text}"
-                )
-                return {"error": str(e)}
+                return _structured_error(e, phone)
             except Exception as e:
                 logger.error(f"Erro ao enviar para {phone}: {e}")
-                return {"error": str(e)}
-        return {"error": "Falha desconhecida no envio de texto"}
+                return {"error": str(e), "error_code": "network_error"}
 
     async def send_media(
         self,

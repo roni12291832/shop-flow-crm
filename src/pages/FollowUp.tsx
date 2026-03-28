@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const PYTHON_BACKEND_URL = "https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app";
+const PYTHON_BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

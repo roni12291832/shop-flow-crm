@@ -2,6 +2,9 @@ from __future__ import annotations
 """
 Rotas de Campanha — Sistema inteligente de disparos em massa com anti-bloqueio.
 """
+import re
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Optional
 
 from pydantic import BaseModel, field_validator
@@ -10,18 +13,35 @@ from fastapi import APIRouter, HTTPException
 from core import logger, DRY_RUN, registrar_automacao, alertar_dono
 from supabase_client import get_supabase
 from uazapi_client import uazapi
+from stages import VALID_STAGES, STAGE_ORDER
 
 router = APIRouter(prefix="/campaigns", tags=["Campanhas"])
 
-# Stages do Pipeline (sincronizados com o Frontend)
-VALID_STAGES = [
-    "lead_novo",
-    "contato_iniciado",
-    "interessado",
-    "comprador",
-    "perdido",
-    "desqualificado",
-]
+_SIMILARITY_THRESHOLD = 0.85  # Variações acima disso são consideradas duplicatas
+
+
+def _normalize_text(text: str) -> str:
+    """Remove acentos, pontuação, espaços extras e converte para minúsculas."""
+    text = text.lower().strip()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _are_too_similar(a: str, b: str) -> bool:
+    """Retorna True se as strings são similares demais (potencial duplicata)."""
+    return SequenceMatcher(None, _normalize_text(a), _normalize_text(b)).ratio() > _SIMILARITY_THRESHOLD
+
+
+def _count_truly_unique(messages: list[str]) -> int:
+    """Conta variações genuinamente diferentes (resistente a truco de maiúsculas/pontuação)."""
+    unique: list[str] = []
+    for msg in messages:
+        if not any(_are_too_similar(msg, u) for u in unique):
+            unique.append(msg)
+    return len(unique)
 
 
 class CampaignRequest(BaseModel):
@@ -47,11 +67,11 @@ class CampaignRequest(BaseModel):
                 "💡 Dica: Cole esse comando no ChatGPT para gerar rapidamente:\n"
                 '   "Gere 15 variações dessa mensagem para mim: [SUA MENSAGEM AQUI]"'
             )
-        unique = set(v)
-        if len(unique) < 15:
+        truly_unique = _count_truly_unique(v)
+        if truly_unique < 15:
             raise ValueError(
-                f"Você tem mensagens DUPLICADAS! Foram encontradas apenas {len(unique)} "
-                f"variações únicas de {len(v)} enviadas. Todas devem ser diferentes."
+                f"Apenas {truly_unique} variações realmente distintas de {len(v)} enviadas. "
+                f"Mensagens muito similares (maiúsculas, pontuação, acentos) são contadas como duplicatas."
             )
         return v
 

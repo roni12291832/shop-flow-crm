@@ -68,7 +68,7 @@ async def job_finance_notifications():
         msg_parts = [f"💰 *Resumo Financeiro — {today.strftime('%d/%m/%Y')}*\n"]
 
         if overdue:
-            total_overdue = sum(float(l.get("value", 0) or l.get("amount", 0) or 0) for l in overdue)
+            total_overdue = sum(float(l["value"] if l.get("value") is not None else l.get("amount") or 0) for l in overdue)
             msg_parts.append(f"🔴 *Contas VENCIDAS:* {len(overdue)} — R$ {total_overdue:,.2f}")
             for item in overdue[:5]:
                 desc = item.get("description", item.get("categoria", "Sem descrição"))
@@ -78,7 +78,7 @@ async def job_finance_notifications():
                 msg_parts.append(f"  ...e mais {len(overdue) - 5}")
 
         if due_soon:
-            total_soon = sum(float(l.get("value", 0) or l.get("amount", 0) or 0) for l in due_soon)
+            total_soon = sum(float(l["value"] if l.get("value") is not None else l.get("amount") or 0) for l in due_soon)
             msg_parts.append(f"\n🟡 *Vencem em 3 dias:* {len(due_soon)} — R$ {total_soon:,.2f}")
             for item in due_soon[:5]:
                 desc = item.get("description", item.get("categoria", "Sem descrição"))

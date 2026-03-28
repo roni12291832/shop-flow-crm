@@ -3,16 +3,48 @@ from __future__ import annotations
 WhatsApp Watcher Agent — Analisa mensagens recebidas e move leads no funil automaticamente.
 Usa GPT-4o-mini para classificar a intenção do cliente com base no histórico da conversa.
 """
+import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from openai import AsyncOpenAI
 from config import get_settings
+from stages import STAGE_ORDER
 
 logger = logging.getLogger("shopflow")
 
-# Ordem do funil — usada para comparar estágios e só avançar para frente
-STAGE_ORDER = ["lead_novo", "contato_iniciado", "interessado", "comprador", "perdido", "desqualificado"]
+def _parse_gpt_json(content: str) -> dict:
+    """
+    Extrai JSON da resposta do GPT de forma robusta.
+    Lida com: JSON puro, JSON em bloco ```json```, JSON embutido em texto.
+    """
+    content = content.strip()
+
+    # Nível 1: parse direto
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # Nível 2: extrai bloco ```json ... ``` ou ``` ... ```
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Nível 3: encontra qualquer { ... } no texto
+    match = re.search(r"\{[^{}]+\}", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Nenhum JSON válido encontrado em: {content[:120]}")
+
 
 SYSTEM_PROMPT = """Você é um analisador de intenção de leads para uma loja de roupas.
 Com base na mensagem recebida e no histórico da conversa, retorne SOMENTE um JSON:
@@ -75,21 +107,37 @@ Nova mensagem do cliente: {new_message}
 
 Etapa atual: {current_stage}"""
 
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-            max_tokens=150,
-        )
+        # Tenta até 2 vezes — GPT ocasionalmente retorna JSON malformado
+        result = None
+        last_error = None
+        for attempt in range(2):
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=150,
+            )
+            content = response.choices[0].message.content if response.choices else None
+            if not content:
+                last_error = "resposta vazia do GPT"
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                continue
+            try:
+                result = _parse_gpt_json(content)
+                break  # sucesso
+            except ValueError as e:
+                last_error = str(e)
+                logger.warning("Watcher: tentativa %d — JSON inválido: %s", attempt + 1, e)
+                if attempt == 0:
+                    await asyncio.sleep(1)
 
-        content = response.choices[0].message.content
-        if not content:
-            return {"moved": False, "reason": "resposta vazia do GPT"}
-
-        result = json.loads(content.strip())
+        if result is None:
+            logger.warning("Watcher: 2 tentativas falharam para cliente %s — %s", client_id, last_error)
+            return {"moved": False, "reason": f"json_parse_failed: {last_error}"}
         suggested_stage = result.get("stage", "")
         confidence = float(result.get("confidence", 0.0))
         reason = result.get("reason", "")
@@ -151,9 +199,6 @@ Etapa atual: {current_stage}"""
         )
         return {"moved": True, "new_stage": suggested_stage, "confidence": confidence, "reason": reason}
 
-    except json.JSONDecodeError as e:
-        logger.warning("Watcher: GPT retornou JSON inválido — %s", e)
-        return {"moved": False, "reason": f"JSON inválido: {e}"}
     except Exception as e:
         logger.warning("Watcher: falhou (não crítico) — %s", e)
         return {"moved": False, "reason": str(e)}

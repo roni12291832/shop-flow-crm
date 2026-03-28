@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # URL pública deste serviço — usada para auto-configurar webhook no UAZAPI a cada startup
     webhook_url: str = ""    # Ex: https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/webhook/uzapi
 
+    # URL do frontend — usada para restringir CORS
+    frontend_url: str = ""   # Ex: https://meucrm.vercel.app
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

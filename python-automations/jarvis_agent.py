@@ -165,11 +165,14 @@ Gere uma resposta adequada:
         )
         return response.choices[0].message.content
 
-    async def analyze_client_intent(self, client_message: str) -> bool:
+    async def analyze_client_intent(self, client_message: str) -> bool | None:
         """Avalia se a mensagem do cliente demonstra interesse em algum produto.
 
-        Retorna False em caso de erro ou resposta inesperada da OpenAI,
-        evitando quebrar o processamento do webhook.
+        Retorna:
+          True  — demonstra interesse de compra
+          False — sem interesse (cumprimento simples, assunto não relacionado)
+          None  — não foi possível determinar (erro de IA, resposta ambígua)
+                  → o chamador deve manter o lead no estágio atual sem penalizá-lo
         """
         if not client_message or not client_message.strip():
             return False
@@ -188,17 +191,22 @@ Responda APENAS "SIM" se for interesse, ou "NAO" caso contrário (por exemplo: u
                 temperature=0.0,
                 max_tokens=10,
             )
-            if not response.choices:
-                logger.warning("analyze_client_intent: OpenAI retornou choices vazio")
+            if not response.choices or not response.choices[0].message.content:
+                logger.warning("analyze_client_intent: OpenAI retornou resposta vazia — intent incerto")
+                return None  # incerto, não penaliza o lead
+
+            content = response.choices[0].message.content.strip().upper()
+            if "SIM" in content:
+                return True
+            if "NAO" in content or "NÃO" in content:
                 return False
-            content = response.choices[0].message.content
-            if content is None:
-                logger.warning("analyze_client_intent: OpenAI retornou content None")
-                return False
-            return "SIM" in content.strip().upper()
+            # Resposta ambígua (não é SIM nem NAO)
+            logger.warning("analyze_client_intent: resposta ambígua '%s' — intent incerto", content[:20])
+            return None
+
         except Exception as e:
-            logger.warning("analyze_client_intent falhou — assumindo sem interesse: %s", e)
-            return False
+            logger.warning("analyze_client_intent falhou — intent incerto (lead não penalizado): %s", e)
+            return None  # incerto — não penaliza o lead por falha de infraestrutura
 
     async def generate_message_variations(self, base_message: str, count: int = 15) -> str:
         """Gera variações de uma mensagem para evitar bloqueio no WhatsApp."""

@@ -5,6 +5,7 @@ Usa GPT-4o-mini para extrair nota, sentimento e temas do feedback do cliente.
 """
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
@@ -14,6 +15,28 @@ from supabase_client import get_supabase
 
 logger = logging.getLogger("shopflow")
 router = APIRouter(prefix="/nps", tags=["NPS"])
+
+
+def _parse_gpt_json(content: str) -> dict:
+    """Extrai JSON da resposta GPT de forma robusta (suporta markdown e texto extra)."""
+    content = content.strip()
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+    match = re.search(r"\{[^{}]+\}", content, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"Nenhum JSON válido em: {content[:120]}")
 
 
 async def process_nps_response(survey_id: str, raw_response: str) -> dict:
@@ -58,29 +81,24 @@ Resposta do cliente: {raw_response}"""
         if not content:
             return {"error": "resposta vazia do GPT"}
 
-        result = json.loads(content.strip())
-
-        # Atualizar no banco
-        db = get_supabase()
         try:
-            db.table("nps_surveys").update({
-                "score": result.get("score"),
-                "classification": result.get("classification"),
-                "sentiment": result.get("sentiment"),
-                "themes": result.get("themes"),
-                "summary": result.get("summary"),
-                "status": "responded",
-                "responded_at": datetime.now(timezone.utc).isoformat(),
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", survey_id).execute()
-        except Exception as db_err:
-            logger.warning("NPS Agent: erro ao salvar no banco (colunas extras podem não existir): %s", db_err)
-            # Fallback com colunas básicas
-            db.table("nps_surveys").update({
-                "score": result.get("score"),
-                "status": "responded",
-                "responded_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", survey_id).execute()
+            result = _parse_gpt_json(content)
+        except ValueError as e:
+            logger.warning("NPS Agent: JSON inválido do GPT — %s", e)
+            return {"error": f"JSON inválido: {e}"}
+
+        # Atualizar no banco — colunas garantidas pela migration 20260328000002
+        db = get_supabase()
+        db.table("nps_surveys").update({
+            "score":          result.get("score"),
+            "classification": result.get("classification"),
+            "sentiment":      result.get("sentiment"),
+            "themes":         result.get("themes"),
+            "summary":        result.get("summary"),
+            "status":         "responded",
+            "responded_at":   datetime.now(timezone.utc).isoformat(),
+            "processed_at":   datetime.now(timezone.utc).isoformat(),
+        }).eq("id", survey_id).execute()
 
         logger.info(
             "NPS processado: survey=%s score=%s classification=%s",
@@ -88,9 +106,6 @@ Resposta do cliente: {raw_response}"""
         )
         return result
 
-    except json.JSONDecodeError as e:
-        logger.warning("NPS Agent: JSON inválido do GPT — %s", e)
-        return {"error": f"JSON inválido: {e}"}
     except Exception as e:
         logger.warning("NPS Agent falhou: %s", e)
         return {"error": str(e)}

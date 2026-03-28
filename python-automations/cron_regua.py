@@ -24,13 +24,58 @@ def _random_delay() -> int:
     return random.randint(15, 60)
 
 
+async def _generate_and_save_variations(rule: dict, db, openai_client) -> list[str]:
+    """
+    Gera MIN_VARIATIONS variações via GPT e salva no banco.
+    Chamada tanto no job de pré-geração (06h) quanto como último recurso no disparo.
+    """
+    base = rule.get("message_template", "")
+    if not base:
+        logger.warning("Regra '%s' sem message_template — impossível gerar variações", rule["name"])
+        return []
+
+    logger.info("Gerando %d variações para regra '%s' com IA...", MIN_VARIATIONS, rule["name"])
+    try:
+        prompt = f"""Gere exatamente {MIN_VARIATIONS} variações diferentes desta mensagem de WhatsApp para uma loja de roupas.
+Cada variação deve ter tom e estrutura ligeiramente diferentes, mas transmitir a mesma mensagem.
+Use as variáveis {{nome}} e {{produto}} onde fizer sentido.
+Retorne SOMENTE um JSON: {{"variations": ["msg1", "msg2", ...]}}
+
+Mensagem base: {base}"""
+
+        resp = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,  # Reduzido de 0.9 para variações mais coerentes
+            max_tokens=2500,
+        )
+        content = resp.choices[0].message.content or ""
+        result = json.loads(content.strip())
+        generated = result.get("variations", [])
+
+        if len(generated) >= MIN_VARIATIONS:
+            # Apaga variações antigas antes de inserir as novas
+            try:
+                db.table("relationship_message_variations").delete().eq("rule_id", rule["id"]).execute()
+                rows = [{"rule_id": rule["id"], "content": v} for v in generated]
+                db.table("relationship_message_variations").insert(rows).execute()
+                logger.info("Variações salvas no banco para regra '%s' (%d)", rule["name"], len(generated))
+            except Exception as save_err:
+                logger.warning("Erro ao salvar variações: %s", save_err)
+            return generated
+
+    except Exception as e:
+        logger.warning("Erro ao gerar variações com IA para regra '%s': %s", rule["name"], e)
+
+    return []
+
+
 async def _get_or_generate_variations(rule: dict, db, openai_client) -> list[str]:
     """
     Busca variações salvas no banco para a regra.
-    Se não houver mínimo de 15, gera automaticamente com GPT-4o-mini.
+    Só chama IA se não houver suficiente — o job de pré-geração (06h) deve ter
+    garantido que as variações já estão no banco antes dos disparos.
     """
-    variations: list[str] = []
-
     # 1. Tenta buscar da tabela relationship_message_variations
     try:
         var_res = (
@@ -41,9 +86,9 @@ async def _get_or_generate_variations(rule: dict, db, openai_client) -> list[str
         )
         variations = [v["content"] for v in (var_res.data or [])]
     except Exception:
-        pass  # Tabela pode não existir ainda
+        variations = []
 
-    # 2. Fallback: divide message_template por ||| (formato antigo)
+    # 2. Fallback: divide message_template por ||| (formato legado)
     if len(variations) < MIN_VARIATIONS:
         raw = rule.get("message_template", "")
         if raw:
@@ -51,45 +96,54 @@ async def _get_or_generate_variations(rule: dict, db, openai_client) -> list[str
             if len(parts) >= MIN_VARIATIONS:
                 return parts
 
-    # 3. Gera com IA se ainda insuficiente
+    # 3. Último recurso: gera com IA agora (lento, pode falhar)
     if len(variations) < MIN_VARIATIONS:
-        base = rule.get("message_template", "")
-        if not base:
-            logger.warning("Regra '%s' sem message_template — não é possível gerar variações", rule["name"])
-            return []
-
-        logger.info("Gerando %d variações para regra '%s' com IA...", MIN_VARIATIONS, rule["name"])
-        try:
-            prompt = f"""Gere exatamente {MIN_VARIATIONS} variações diferentes desta mensagem de WhatsApp para uma loja de roupas.
-Cada variação deve ter tom e estrutura ligeiramente diferentes, mas transmitir a mesma mensagem.
-Use as variáveis {{nome}} e {{produto}} onde fizer sentido.
-Retorne SOMENTE um JSON: {{"variations": ["msg1", "msg2", ...]}}
-
-Mensagem base: {base}"""
-
-            resp = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.9,
-                max_tokens=2500,
-            )
-            content = resp.choices[0].message.content or ""
-            result = json.loads(content.strip())
-            generated = result.get("variations", [])
-
-            if len(generated) >= MIN_VARIATIONS:
-                # Salvar no banco para uso futuro
-                try:
-                    rows = [{"rule_id": rule["id"], "content": v} for v in generated]
-                    db.table("relationship_message_variations").insert(rows).execute()
-                    logger.info("Variações salvas no banco para regra '%s'", rule["name"])
-                except Exception as save_err:
-                    logger.warning("Erro ao salvar variações (não crítico): %s", save_err)
-                variations = generated
-        except Exception as e:
-            logger.warning("Erro ao gerar variações com IA: %s", e)
+        logger.warning(
+            "Regra '%s' sem variações suficientes (%d/%d) — gerando em tempo real (job 06h não rodou?)",
+            rule["name"], len(variations), MIN_VARIATIONS,
+        )
+        variations = await _generate_and_save_variations(rule, db, openai_client)
 
     return variations
+
+
+async def job_ensure_variations() -> None:
+    """
+    Job de pré-geração: garante que todas as réguas ativas têm variações suficientes.
+    Roda às 06h todo dia via APScheduler — antes da janela de disparos (08h-18h).
+    Separa a geração de IA do momento do disparo para máxima robustez.
+    """
+    logger.info("job_ensure_variations: verificando variações de todas as réguas ativas")
+    db = get_supabase()
+    s = get_settings()
+    openai_client = AsyncOpenAI(api_key=s.openai_api_key)
+
+    rules_res = db.table("relationship_rules").select("*").eq("active", True).execute()
+    active_rules = rules_res.data or []
+
+    if not active_rules:
+        logger.info("job_ensure_variations: nenhuma régua ativa")
+        return
+
+    for rule in active_rules:
+        try:
+            count_res = (
+                db.table("relationship_message_variations")
+                .select("id", count="exact")
+                .eq("rule_id", rule["id"])
+                .execute()
+            )
+            count = count_res.count or 0
+            if count < MIN_VARIATIONS:
+                logger.info(
+                    "Régua '%s' tem %d/%d variações — gerando agora",
+                    rule["name"], count, MIN_VARIATIONS,
+                )
+                await _generate_and_save_variations(rule, db, openai_client)
+            else:
+                logger.info("Régua '%s': %d variações OK", rule["name"], count)
+        except Exception as e:
+            logger.error("Erro ao verificar variações da régua '%s': %s", rule.get("name"), e)
 
 
 async def _already_sent_today(db, rule_id: str, client_id: str) -> bool:

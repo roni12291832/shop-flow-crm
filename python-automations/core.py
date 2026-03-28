@@ -53,6 +53,12 @@ from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
+# Detecta ambiente de produção (Koyeb define KOYEB_SERVICE_NAME automaticamente)
+IS_PRODUCTION: bool = bool(
+    os.getenv("KOYEB_SERVICE_NAME")
+    or os.getenv("ENV", "").lower() == "production"
+)
+
 import httpx
 from tenacity import (
     before_sleep_log,
@@ -103,33 +109,58 @@ def setup_logging() -> logging.Logger:
     root.setLevel(logging.DEBUG)
     root.addHandler(console_handler)
 
-    # Tenta criar handler de arquivo
-    try:
-        log_dir = Path("logs")
+    # Em produção (Koyeb): só console — stdout é capturado pelo painel do Koyeb.
+    # Em desenvolvimento: adiciona arquivo rotativo local.
+    if not IS_PRODUCTION:
         try:
+            log_dir = Path("logs")
             log_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            # Fallback para /tmp se falhar no diretório local
-            log_dir = Path("/tmp/shopflow_logs")
-            log_dir.mkdir(parents=True, exist_ok=True)
-            
-        log_file = log_dir / "shopflow.log"
-        file_handler = TimedRotatingFileHandler(
-            log_file,
-            when="midnight",
-            interval=1,
-            backupCount=30,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(_LOG_FMT)
-        root.addHandler(file_handler)
-        shopflow_logger.info("Logging inicializado em arquivo: %s", log_file)
-    except Exception as e:
-        shopflow_logger.warning("Falha ao inicializar logging em arquivo (usando apenas console): %s", e)
+            log_file = log_dir / "shopflow.log"
+            file_handler = TimedRotatingFileHandler(
+                log_file,
+                when="midnight",
+                interval=1,
+                backupCount=30,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(_LOG_FMT)
+            root.addHandler(file_handler)
+            shopflow_logger.info("Logging em arquivo: %s", log_file)
+        except Exception as e:
+            shopflow_logger.warning("Falha ao criar log em arquivo: %s", e)
 
-    shopflow_logger.info("Logging (console) inicializado | DRY_RUN=%s", DRY_RUN)
+    # Handler Supabase: persiste logs ERROR+ no banco para consulta pós-redeploy
+    root.addHandler(_SupabaseLogHandler())
+
+    shopflow_logger.info("Logging inicializado | IS_PRODUCTION=%s | DRY_RUN=%s", IS_PRODUCTION, DRY_RUN)
     return shopflow_logger
+
+
+class _SupabaseLogHandler(logging.Handler):
+    """
+    Salva logs de nível ERROR ou superior na tabela system_logs do Supabase.
+    Resolve o problema de logs efêmeros em produção (Koyeb apaga /tmp no redeploy).
+    Criado pela migration 20260328000002.
+    """
+
+    def __init__(self):
+        super().__init__(level=logging.ERROR)
+        self.setFormatter(_LOG_FMT)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Nunca lança exceção — um log handler não pode gerar novos erros
+        try:
+            from supabase_client import get_supabase  # import local evita circular
+            db = get_supabase()
+            db.table("system_logs").insert({
+                "level":      record.levelname,
+                "logger":     record.name,
+                "message":    self.format(record),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception:
+            pass  # silencia — não pode logar erro do logger
 
 logger = setup_logging()
 

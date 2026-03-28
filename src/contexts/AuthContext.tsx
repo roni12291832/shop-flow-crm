@@ -38,6 +38,23 @@ export function applyThemeColors(primary?: string | null, secondary?: string | n
       document.documentElement.style.setProperty("--ring", hsl);
     }
   }
+  if (secondary) {
+    const hsl = hexToHsl(secondary);
+    if (hsl) {
+      document.documentElement.style.setProperty("--accent", hsl);
+      document.documentElement.style.setProperty("--chart-2", hsl);
+    }
+  }
+}
+
+async function fetchAndApplyTenantColors() {
+  const { data } = await supabase
+    .from("tenants")
+    .select("primary_color, secondary_color")
+    .single();
+  if (data) {
+    applyThemeColors(data.primary_color, data.secondary_color);
+  }
 }
 
 interface Profile {
@@ -104,9 +121,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (session?.user) {
           setTimeout(async () => {
-            await fetchProfile(session.user.id);
-            await fetchRoles(session.user.id);
-            setLoading(false);
+            try {
+              await Promise.all([
+                fetchProfile(session.user.id),
+                fetchRoles(session.user.id),
+                fetchAndApplyTenantColors(),
+              ]);
+            } catch (err) {
+              console.error("Erro ao carregar perfil do usuário:", err);
+            } finally {
+              setLoading(false);
+            }
           }, 0);
         } else {
           setProfile(null);
@@ -120,9 +145,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id).then(() => {
-          fetchRoles(session.user.id).then(() => setLoading(false));
-        });
+        Promise.all([
+          fetchProfile(session.user.id),
+          fetchRoles(session.user.id),
+          fetchAndApplyTenantColors(),
+        ])
+          .catch((err) => console.error("Erro ao carregar sessão:", err))
+          .finally(() => setLoading(false));
       } else {
         setLoading(false);
       }

@@ -86,11 +86,12 @@ export default function Dashboard() {
     const prevMonthEnd = endOfDay(subDays(monthStart, 1));
 
     try {
-      // 1. Fetch Sales (Multiple months for comparison)
+      // 1. Fetch Sales (2 meses para comparação, limitado a 500 registros)
       const { data: sales } = await supabase.from("sales_entries")
         .select("*, clients(name, origin)")
         .gte("sold_at", prevMonthStart.toISOString())
-        .order("sold_at", { ascending: false });
+        .order("sold_at", { ascending: false })
+        .limit(500);
 
       const confirmedSales = (sales || []).filter(s => s.status === "confirmado");
       const currentMonthSales = confirmedSales.filter(s => new Date(s.sold_at) >= monthStart);
@@ -104,9 +105,9 @@ export default function Dashboard() {
 
       // 2. Fetch Products and Movements (Inventory & Margin)
       const [{ data: products }, { data: movements }] = await Promise.all([
-        supabase.from("products").select("*"),
+        supabase.from("products").select("*").limit(200),
         supabase.from("inventory_movements").select("*, products(name)")
-          .gte("created_at", monthStart.toISOString())
+          .gte("created_at", monthStart.toISOString()).limit(300),
       ]);
 
       const lowStock = (products || []).filter(p => p.active && p.current_stock <= p.min_stock);
@@ -146,9 +147,9 @@ export default function Dashboard() {
       });
 
       // 4. Team & Client Performance
-      const { data: profiles } = await supabase.from("profiles").select("*");
-      const { data: clients } = await supabase.from("clients").select("*");
-      const { data: npsSurveys } = await supabase.from("nps_surveys").select("*").eq("status", "responded");
+      const { data: profiles } = await supabase.from("profiles").select("*").limit(50);
+      const { data: clients } = await supabase.from("clients").select("id, name, origin, ticket_medio, last_purchase, created_at").limit(200);
+      const { data: npsSurveys } = await supabase.from("nps_surveys").select("score, classification, responded_at").eq("status", "responded").limit(100);
 
       const newClients = (clients || []).filter(c => new Date(c.created_at) >= monthStart).length;
       

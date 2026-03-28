@@ -56,16 +56,15 @@ export function AiAssistant() {
     const [
       clientsRes, oppsRes, salesRes, tasksRes, productsRes, npsRes
     ] = await Promise.all([
-      supabase.from("clients").select("id, name, origin, last_purchase, ticket_medio, created_at", { count: "exact" })
-        ,
-      supabase.from("opportunities").select("id, stage, estimated_value, title, created_at")
-        ,
+      // count via head:true é muito mais rápido que count:"exact" (não carrega dados)
+      supabase.from("clients").select("id, name, origin, last_purchase, ticket_medio, created_at", { count: "exact", head: false }).limit(50),
+      supabase.from("opportunities").select("id, stage, estimated_value, title, created_at").limit(200),
       supabase.from("sales_entries").select("id, value, payment_method, status, sold_at, user_id")
-        .eq("status", "confirmado").gte("sold_at", startOfMonth),
+        .eq("status", "confirmado").gte("sold_at", startOfMonth).limit(200),
       supabase.from("tasks").select("id, title, status, due_date, priority")
         .eq("status", "pendente").order("due_date", { ascending: true }).limit(10),
       supabase.from("products").select("id, name, current_stock, min_stock, sell_price, category")
-        .eq("active", true),
+        .eq("active", true).limit(100),
       supabase.from("nps_surveys").select("score, category, created_at")
         .eq("status", "responded").order("created_at", { ascending: false }).limit(20),
     ]);
@@ -136,8 +135,8 @@ ${clients.slice(0, 5).map(c => `- ${c.name} (${c.origin || "sem origem"})${c.las
         .map(m => ({ role: m.role, content: m.content }));
       conversationMessages.push({ role: "user", content: userMsg.content });
 
-      // Call Python Backend on Koyeb
-      const response = await fetch("https://artificial-vivian-ggenciaglobalnexus-d093d570.koyeb.app/jarvis/ask", {
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiUrl}/jarvis/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

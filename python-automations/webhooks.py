@@ -24,18 +24,50 @@ from jarvis_agent import jarvis
 from config import get_settings
 from followup_engine import cancel_pending_for_client, on_stage_change
 from whatsapp_watcher_agent import analyze_and_move_lead as watcher_analyze
+from stages import VALID_STAGES, TERMINAL_STAGES
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 
-# Stages do Pipeline (sincronizados com o Frontend)
-PIPELINE_STAGES = [
-    "lead_novo",
-    "contato_iniciado",
-    "interessado",
-    "comprador",
-    "perdido",
-    "desqualificado",
-]
+# ─── Mapa de extração de texto por tipo de mensagem UAZAPI ────────────────────
+# Cada chave é um campo do objeto `message` do payload da UAZAPI.
+# O valor é uma função que extrai o texto daquele tipo.
+_MSG_EXTRACTORS = {
+    "conversation":        lambda m: m.get("conversation") or "",
+    "extendedTextMessage": lambda m: (m.get("extendedTextMessage") or {}).get("text") or "",
+    "imageMessage":        lambda m: (m.get("imageMessage") or {}).get("caption") or "[Imagem]",
+    "videoMessage":        lambda m: (m.get("videoMessage") or {}).get("caption") or "[Vídeo]",
+    "documentMessage":     lambda m: (m.get("documentMessage") or {}).get("caption") or "[Documento]",
+    "audioMessage":        lambda m: "[Áudio]",
+    "pttMessage":          lambda m: "[Áudio]",
+    "stickerMessage":      lambda m: "[Figurinha]",
+    "contactMessage":      lambda m: "[Contato]",
+    "locationMessage":     lambda m: "[Localização]",
+    "reactionMessage":     lambda m: (m.get("reactionMessage") or {}).get("text") or "[Reação]",
+    "pollCreationMessage": lambda m: (m.get("pollCreationMessage") or {}).get("name") or "[Enquete]",
+}
+
+
+def _extract_message_text(msg_obj: dict, message_data: dict) -> tuple[str, str]:
+    """
+    Extrai (texto, tipo) de qualquer payload UAZAPI.
+    Nunca retorna string vazia sem registrar — tipos desconhecidos são logados.
+    """
+    if not isinstance(msg_obj, dict):
+        return str(msg_obj) if msg_obj else "", "unknown"
+
+    for key, extractor in _MSG_EXTRACTORS.items():
+        if key in msg_obj:
+            text = extractor(msg_obj)
+            return text, key
+
+    # Tipo desconhecido — tenta campos genéricos e loga para mapeamento futuro
+    fallback = message_data.get("body") or message_data.get("text") or ""
+    unknown_keys = list(msg_obj.keys())
+    logger.warning("Tipo de mensagem UAZAPI desconhecido: %s — fallback='%s'", unknown_keys, fallback[:50])
+    return fallback, "unknown"
+
+
+# PIPELINE_STAGES importado de stages.py (fonte única de verdade)
 
 
 @router.post("/setup")
@@ -139,26 +171,18 @@ async def receive_whatsapp_message(request: Request):
     remote_jid = key.get("remoteJid", "") or message_data.get("from", "") or ""
     from_me = key.get("fromMe", False) or message_data.get("fromMe", False)
 
+    # ID único da mensagem no WhatsApp — usado para deduplicação
+    provider_message_id = (
+        key.get("id")
+        or message_data.get("id")
+        or message_data.get("messageId")
+    )
+
     msg_obj = message_data.get("message", {}) or {}
     if isinstance(msg_obj, str):
-        message_text = msg_obj
-    elif isinstance(msg_obj, dict):
-        # Extrai texto em cascata — cada tipo de mensagem tem seu campo específico.
-        # Usando blocos if/elif explícitos para evitar bug de precedência do operador
-        # `or` vs ternário `if/else` que mascarava fallbacks quando o campo existia mas estava vazio.
-        message_text = msg_obj.get("conversation") or ""
-        if not message_text and isinstance(msg_obj.get("extendedTextMessage"), dict):
-            message_text = msg_obj["extendedTextMessage"].get("text", "")
-        if not message_text and isinstance(msg_obj.get("imageMessage"), dict):
-            message_text = msg_obj["imageMessage"].get("caption", "")
-        if not message_text and isinstance(msg_obj.get("videoMessage"), dict):
-            message_text = msg_obj["videoMessage"].get("caption", "")
-        if not message_text and isinstance(msg_obj.get("documentMessage"), dict):
-            message_text = msg_obj["documentMessage"].get("caption", "")
-        if not message_text:
-            message_text = message_data.get("body") or message_data.get("text") or ""
+        message_text, _msg_type = msg_obj, "text"
     else:
-        message_text = ""
+        message_text, _msg_type = _extract_message_text(msg_obj, message_data)
 
     push_name = (
         message_data.get("pushName", "")
@@ -175,6 +199,21 @@ async def receive_whatsapp_message(request: Request):
 
     try:
         db = get_supabase()
+
+        # ─── Deduplicação de webhook ──────────────────────────────────────────
+        # A UAZAPI pode reenviar o mesmo evento 2-3x em caso de timeout de resposta.
+        # Verificamos pelo provider_message_id ANTES de processar qualquer coisa.
+        if provider_message_id:
+            dup = (
+                db.table("messages")
+                .select("id")
+                .eq("provider_message_id", provider_message_id)
+                .limit(1)
+                .execute()
+            )
+            if dup.data:
+                logger.info("Webhook duplicado ignorado: provider_message_id=%s", provider_message_id)
+                return {"status": "ignored", "reason": "mensagem já processada"}
 
         # ─── 1. Busca ou cria Cliente ─────────────────────────────────────
         client_res = db.table("clients").select("*").eq("phone", phone).limit(1).execute()
@@ -247,23 +286,27 @@ async def receive_whatsapp_message(request: Request):
         # ─── 3. Salva Mensagem ────────────────────────────────────────────
         if not DRY_RUN:
             try:
-                # Detectar tipo de mensagem
-                _msg_type = "text"
-                if isinstance(msg_obj, dict):
-                    if msg_obj.get("imageMessage"): _msg_type = "image"
-                    elif msg_obj.get("videoMessage"): _msg_type = "video"
-                    elif msg_obj.get("audioMessage") or msg_obj.get("pttMessage"): _msg_type = "audio"
-                    elif msg_obj.get("documentMessage"): _msg_type = "document"
-                    elif msg_obj.get("locationMessage"): _msg_type = "location"
+                # _msg_type já foi detectado por _extract_message_text()
+                # Normaliza nomes para o schema do banco
+                _type_map = {
+                    "conversation": "text", "extendedTextMessage": "text",
+                    "imageMessage": "image", "videoMessage": "video",
+                    "audioMessage": "audio", "pttMessage": "audio",
+                    "documentMessage": "document", "locationMessage": "location",
+                    "stickerMessage": "text", "contactMessage": "text",
+                    "reactionMessage": "text", "pollCreationMessage": "text",
+                }
+                db_msg_type = _type_map.get(_msg_type, "text")
                 db.table("messages").insert({
-                    "conversation_id": conversation_id,
-                    "client_id": client_id,
-                    "content": message_text,
-                    "sender_type": "cliente",
-                    "channel": "whatsapp",
-                    "is_from_client": True,
-                    "type": _msg_type,
-                    "direction": "inbound",
+                    "conversation_id":    conversation_id,
+                    "client_id":          client_id,
+                    "content":            message_text,
+                    "sender_type":        "cliente",
+                    "channel":            "whatsapp",
+                    "is_from_client":     True,
+                    "type":               db_msg_type,
+                    "direction":          "inbound",
+                    "provider_message_id": provider_message_id,
                 }).execute()
                 logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
             except Exception as e:
@@ -384,13 +427,19 @@ async def receive_whatsapp_message(request: Request):
             )
             history = list(reversed(history_res.data or []))
 
+            # analyze_client_intent retorna True/False/None
+        # None = IA indisponível — não penaliza o lead, apenas pula a resposta automática
+        intent = await jarvis.analyze_client_intent(message_text) if message_text else False
+
+        reply = None
+        if intent is not False:  # True ou None (incerto) → tenta responder
             reply = await jarvis.auto_reply_lead(
                 client_name=client.get("name", "Cliente"),
                 client_message=message_text,
                 client_history=history,
             )
 
-            if reply:
+        if reply:
                 instance_res = (
                     db.table("whatsapp_instances")
                     .select("api_url, api_token, instance_name")

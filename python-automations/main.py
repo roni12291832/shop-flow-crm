@@ -39,7 +39,7 @@ except Exception as _fe:
     _FOLLOWUP_ENABLED = False
 
 try:
-    from cron_regua import main as job_regua_relacionamento
+    from cron_regua import main as job_regua_relacionamento, job_ensure_variations
     _REGUA_ENABLED = True
 except Exception as _re:
     import logging as _logging
@@ -126,14 +126,13 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
 
-    # Follow-up automático — MODO TESTE: roda a cada 1 minuto
-    # ⚠️ REVERTER PARA hours=1 após confirmar que está funcionando!
+    # Follow-up automático — a cada 1 hora
     if _FOLLOWUP_ENABLED and job_process_followups:
         scheduler.add_job(
             job_process_followups,
-            IntervalTrigger(minutes=1),
+            IntervalTrigger(hours=1),
             id="followup_engine",
-            name="Motor de Follow-Up Automático (TESTE)",
+            name="Motor de Follow-Up Automático",
             replace_existing=True,
         )
 
@@ -144,6 +143,14 @@ async def lifespan(app: FastAPI):
             IntervalTrigger(minutes=30),
             id="regua_relacionamento",
             name="Régua de Relacionamento",
+            replace_existing=True,
+        )
+        # Pré-geração de variações — todo dia às 06h (antes da janela de disparos)
+        scheduler.add_job(
+            job_ensure_variations,
+            CronTrigger(hour=6, minute=0, timezone="America/Sao_Paulo"),
+            id="ensure_variations",
+            name="Pré-geração de Variações Anti-Ban",
             replace_existing=True,
         )
 
@@ -162,6 +169,7 @@ async def lifespan(app: FastAPI):
     logger.info("   🔄 Sync offline: a cada 6h")
     logger.info("   ⚠️  Leads parados: a cada 12h")
     logger.info("   📲 Follow-up automático: a cada 1h")
+    logger.info(f"   🌐 CORS origin: {_allowed_origins}")
 
     # Auto-configura webhook no UAZAPI para garantir que deploys não quebrem a integração
     asyncio.create_task(_setup_webhooks_on_startup())
@@ -189,10 +197,16 @@ app = FastAPI(
 )
 
 # CORS para o frontend React poder chamar
+_s = get_settings()
+_allowed_origins = (
+    [_s.frontend_url]
+    if _s.frontend_url
+    else ["*"]  # fallback em dev — defina FRONTEND_URL em produção
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=bool(_s.frontend_url),  # credentials só com origem específica
     allow_methods=["*"],
     allow_headers=["*"],
 )
