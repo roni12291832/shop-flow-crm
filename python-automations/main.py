@@ -22,6 +22,7 @@ from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
 from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
+from finance_notifications import job_finance_notifications
 from jarvis_agent import jarvis
 _IMPORT_ERROR = None
 try:
@@ -36,6 +37,22 @@ except Exception as _fe:
     followup_router = None  # type: ignore
     job_process_followups = None  # type: ignore
     _FOLLOWUP_ENABLED = False
+
+try:
+    from cron_regua import main as job_regua_relacionamento
+    _REGUA_ENABLED = True
+except Exception as _re:
+    import logging as _logging
+    _logging.getLogger("shopflow").warning("FALHA ao importar cron_regua: %s", _re)
+    job_regua_relacionamento = None
+    _REGUA_ENABLED = False
+
+try:
+    from nps_agent import router as nps_router
+    _NPS_ENABLED = True
+except Exception as _ne:
+    nps_router = None
+    _NPS_ENABLED = False
 
 
 async def _setup_webhooks_on_startup():
@@ -120,8 +137,27 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
 
+    # Régua de relacionamento — a cada 30 minutos
+    if _REGUA_ENABLED and job_regua_relacionamento:
+        scheduler.add_job(
+            job_regua_relacionamento,
+            IntervalTrigger(minutes=30),
+            id="regua_relacionamento",
+            name="Régua de Relacionamento",
+            replace_existing=True,
+        )
+
+    # Notificações financeiras — 8h todo dia
+    scheduler.add_job(
+        job_finance_notifications,
+        CronTrigger(hour=8, minute=0, timezone="America/Sao_Paulo"),
+        id="finance_notifications",
+        name="Notificações Financeiras",
+        replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("🚀 Scheduler iniciado com 4 jobs agendados")
+    logger.info("🚀 Scheduler iniciado com 6 jobs agendados")
     logger.info(f"   📊 Relatório diário: {s.report_hour}:{s.report_minute:02d}")
     logger.info("   🔄 Sync offline: a cada 6h")
     logger.info("   ⚠️  Leads parados: a cada 12h")
@@ -180,6 +216,9 @@ else:
             }
         )
 
+if _NPS_ENABLED and nps_router:
+    app.include_router(nps_router)
+
 
 @app.get("/")
 async def root():
@@ -191,7 +230,7 @@ async def root():
     return {
         "service": "Shop Flow CRM Automações",
         "status": "online",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "followup_enabled": _FOLLOWUP_ENABLED,
         "import_error": _IMPORT_ERROR if _IMPORT_ERROR else None,
         "scheduled_jobs": jobs,

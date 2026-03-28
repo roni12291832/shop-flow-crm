@@ -23,6 +23,7 @@ from uazapi_client import uazapi
 from jarvis_agent import jarvis
 from config import get_settings
 from followup_engine import cancel_pending_for_client, on_stage_change
+from whatsapp_watcher_agent import analyze_and_move_lead as watcher_analyze
 
 router = APIRouter(prefix="/webhook", tags=["Webhooks"])
 
@@ -246,6 +247,14 @@ async def receive_whatsapp_message(request: Request):
         # ─── 3. Salva Mensagem ────────────────────────────────────────────
         if not DRY_RUN:
             try:
+                # Detectar tipo de mensagem
+                _msg_type = "text"
+                if isinstance(msg_obj, dict):
+                    if msg_obj.get("imageMessage"): _msg_type = "image"
+                    elif msg_obj.get("videoMessage"): _msg_type = "video"
+                    elif msg_obj.get("audioMessage") or msg_obj.get("pttMessage"): _msg_type = "audio"
+                    elif msg_obj.get("documentMessage"): _msg_type = "document"
+                    elif msg_obj.get("locationMessage"): _msg_type = "location"
                 db.table("messages").insert({
                     "conversation_id": conversation_id,
                     "client_id": client_id,
@@ -253,6 +262,8 @@ async def receive_whatsapp_message(request: Request):
                     "sender_type": "cliente",
                     "channel": "whatsapp",
                     "is_from_client": True,
+                    "type": _msg_type,
+                    "direction": "inbound",
                 }).execute()
                 logger.info("Mensagem de %s salva na conversa %s: %.50s...", push_name, conversation_id, message_text)
             except Exception as e:
@@ -294,33 +305,65 @@ async def receive_whatsapp_message(request: Request):
                     if ins.data:
                         opportunity_action = "created_lead_novo"
                         logger.info("Oportunidade 'lead_novo' criada para %s (%s)", push_name, phone)
+                        try:
+                            await on_stage_change(
+                                client_id=str(client_id),
+                                opportunity_id=str(ins.data[0]["id"]),
+                                new_stage="lead_novo",
+                                old_stage=None,
+                            )
+                        except Exception as fe:
+                            logger.warning("Erro ao acionar follow-up de 'lead_novo' (não crítico): %s", fe)
                     else:
                         opportunity_action = "create_failed"
                         logger.error("Falha ao criar oportunidade para %s: %s", push_name, ins)
 
-                elif existing_opp["stage"] in ("lead_novo", "contato_iniciado"):
-                    # Oportunidade ativa em etapa inicial → tenta avançar via IA
+                elif existing_opp["stage"] not in ("comprador", "perdido", "desqualificado"):
+                    # Oportunidade em etapa ativa → analisa mensagem com Watcher Agent (IA avançada)
                     old_stage = existing_opp["stage"]
                     opportunity_action = f"existing_{old_stage}"
                     try:
-                        is_interested = await jarvis.analyze_client_intent(message_text)
-                        if is_interested:
-                            db.table("opportunities").update({"stage": "interessado"}).eq("id", existing_opp["id"]).execute()
-                            opportunity_action = "advanced_to_interessado"
-                            logger.info("Oportunidade de %s avançada para 'interessado' via IA", push_name)
-                            # Aciona follow-up para a nova etapa — essencial para agendar
-                            # as mensagens automáticas de 'interessado' na fila de follow-up.
+                        # Busca histórico de mensagens do cliente para contexto
+                        hist_res = (
+                            db.table("messages")
+                            .select("content, is_from_client")
+                            .eq("client_id", client_id)
+                            .order("created_at", desc=True)
+                            .limit(10)
+                            .execute()
+                        )
+                        history = list(reversed(hist_res.data or []))
+
+                        watcher_result = await watcher_analyze(
+                            client_id=str(client_id),
+                            opportunity_id=str(existing_opp["id"]),
+                            current_stage=old_stage,
+                            new_message=message_text,
+                            message_history=history,
+                            db=db,
+                        )
+
+                        if watcher_result.get("moved"):
+                            new_stage = watcher_result["new_stage"]
+                            opportunity_action = f"advanced_to_{new_stage}"
+                            logger.info(
+                                "Watcher moveu %s de '%s' → '%s': %s",
+                                push_name, old_stage, new_stage, watcher_result.get("reason"),
+                            )
                             try:
                                 await on_stage_change(
                                     client_id=str(client_id),
                                     opportunity_id=str(existing_opp["id"]),
-                                    new_stage="interessado",
+                                    new_stage=new_stage,
                                     old_stage=old_stage,
                                 )
                             except Exception as fe:
-                                logger.warning("Erro ao acionar follow-up de 'interessado' (não crítico): %s", fe)
+                                logger.warning("Erro ao acionar follow-up após watcher (não crítico): %s", fe)
+                        else:
+                            opportunity_action = f"existing_{old_stage}_no_change"
                     except Exception as e:
-                        logger.warning("Erro ao analisar intenção via IA (não crítico): %s", e)
+                        logger.warning("Watcher Agent falhou (não crítico): %s", e)
+                        opportunity_action = f"existing_{old_stage}_watcher_error"
 
                 else:
                     opportunity_action = f"existing_{existing_opp['stage']}_no_change"
@@ -375,6 +418,8 @@ async def receive_whatsapp_message(request: Request):
                             "sender_type": "agent",
                             "channel": "whatsapp",
                             "is_from_client": False,
+                            "type": "text",
+                            "direction": "outbound",
                         }).execute()
                         logger.info("Jarvis respondeu automaticamente para %s", push_name)
 

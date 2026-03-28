@@ -68,7 +68,34 @@ export default function Pipeline() {
     setClients((clientsRes.data || []) as Client[]);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+
+    // Realtime — atualiza pipeline automaticamente quando leads chegam ou mudam de etapa
+    const channel = supabase
+      .channel("pipeline-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "opportunities" },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            toast.info("🔔 Novo lead no pipeline!");
+            fetchData();
+          }
+          if (payload.eventType === "UPDATE") {
+            fetchData();
+          }
+          if (payload.eventType === "DELETE") {
+            fetchData();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

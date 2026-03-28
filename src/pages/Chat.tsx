@@ -187,6 +187,64 @@ function getInitials(name: string): string {
   return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "?";
 }
 
+// ========== MessageContent ==========
+function MessageContent({ msg }: { msg: WaMessage }) {
+  const type = (msg.type || "text").toLowerCase().replace("message", "");
+  const mediaUrl = msg.media_url;
+  const text = msg.text;
+
+  if ((type.includes("image") || type === "image") && mediaUrl) {
+    return (
+      <div className="flex flex-col gap-1">
+        <img
+          src={mediaUrl}
+          alt="Imagem"
+          className="max-w-[220px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+          onClick={() => window.open(mediaUrl, "_blank")}
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+        />
+        {text && !text.startsWith("[") && <p className="text-sm mt-1">{text}</p>}
+      </div>
+    );
+  }
+
+  if ((type.includes("audio") || type.includes("ptt")) && mediaUrl) {
+    return (
+      <audio controls src={mediaUrl} className="h-8 max-w-[220px]" preload="metadata" />
+    );
+  }
+
+  if (type.includes("video") && mediaUrl) {
+    return (
+      <video controls className="max-w-[220px] rounded-lg" preload="metadata">
+        <source src={mediaUrl} />
+      </video>
+    );
+  }
+
+  if (type.includes("document") && mediaUrl) {
+    const filename = text?.replace("[Documento: ", "").replace("]", "") || "Arquivo";
+    return (
+      <a href={mediaUrl} target="_blank" rel="noopener noreferrer"
+        className="flex items-center gap-1.5 text-sm underline opacity-90">
+        📎 {filename}
+      </a>
+    );
+  }
+
+  if (type.includes("location")) {
+    return <p className="text-sm">📍 Localização enviada</p>;
+  }
+
+  if (type.includes("sticker")) {
+    return <p className="text-sm">🎭 Sticker</p>;
+  }
+
+  // Default: texto
+  const displayText = text || msgTypePreview(msg.type, "");
+  return <p className="text-sm whitespace-pre-wrap break-words">{displayText}</p>;
+}
+
 // ========== COMPONENT ==========
 export default function Chat() {
   const { user } = useAuth();
@@ -823,7 +881,7 @@ export default function Chat() {
                           ? "bg-primary text-primary-foreground rounded-br-sm"
                           : "bg-card border border-border/60 text-foreground rounded-bl-sm"
                       }`}>
-                        {renderMessageContent(m)}
+                        <MessageContent msg={m} />
                         {/* Time + status */}
                         <div className={`flex items-center gap-1 justify-end mt-0.5 ${isMe ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                           <span className="text-[10px]">{formatMsgTime(m.timestamp)}</span>
