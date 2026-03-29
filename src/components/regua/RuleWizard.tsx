@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Heart, ShoppingBag, ArrowLeft, ArrowRight, Check,
   Sparkles, Trash2, Plus, Info, AlertCircle, CheckCircle2,
-  Loader2, Image, Video, Upload, X, Film,
+  Loader2, Image, Video, Upload, X, Film, Calendar,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -50,11 +50,12 @@ interface RuleWizardProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function countWorkingDays(startIso: string, endIso: string): number {
+function countWorkingDays(startIso: string | null | undefined, endIso: string | null | undefined): number {
   if (!startIso || !endIso) return 0;
   try {
     const start = new Date(startIso);
     const end = new Date(endIso);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
     if (end <= start) return 0;
     let count = 0;
     const cur = new Date(start);
@@ -68,10 +69,11 @@ function countWorkingDays(startIso: string, endIso: string): number {
   }
 }
 
-function toLocalDatetimeInput(iso: string): string {
+function toLocalDatetimeInput(iso: string | null | undefined): string {
   if (!iso) return "";
   try {
     const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   } catch {
@@ -90,6 +92,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [generatingVariations, setGeneratingVariations] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   const defaultStart = () => {
     const d = new Date();
@@ -105,20 +108,18 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const emptyForm = (): RuleFormData => ({
-    name: initialData?.name || "",
-    trigger_event: initialData?.trigger_event || "birthday",
+  const [form, setForm] = useState<RuleFormData>({
+    name: "",
+    trigger_event: "birthday",
     channel: "whatsapp",
-    message_template: initialData?.message_template || "",
-    active: initialData?.active ?? true,
-    campaign_start: initialData?.campaign_start || defaultStart(),
-    campaign_end: initialData?.campaign_end || defaultEnd(),
-    variations: initialData?.variations || [],
-    media_urls: initialData?.media_urls || [],
+    message_template: "",
+    active: true,
+    campaign_start: (() => { const d = new Date(); d.setHours(8, 0, 0, 0); return d.toISOString(); })(),
+    campaign_end: (() => { const d = new Date(); d.setDate(d.getDate() + 30); d.setHours(18, 0, 0, 0); return d.toISOString(); })(),
+    variations: [],
+    media_urls: [],
     pendingMedia: [],
   });
-
-  const [form, setForm] = useState<RuleFormData>(emptyForm);
 
   // Base message para enviar ao Jarvis
   const [baseMessage, setBaseMessage] = useState(
@@ -126,7 +127,9 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
   );
 
   useEffect(() => {
-    if (open && initialData) {
+    if (!open) return;
+    setRenderError(null);
+    if (initialData) {
       setForm({
         name: initialData.name || "",
         trigger_event: initialData.trigger_event || "birthday",
@@ -141,9 +144,23 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
       });
       const base = initialData.message_template?.split("|||")[0]?.trim() || "";
       setBaseMessage(base);
-      setStep(1);
+    } else {
+      setForm({
+        name: "",
+        trigger_event: "birthday",
+        channel: "whatsapp",
+        message_template: "",
+        active: true,
+        campaign_start: defaultStart(),
+        campaign_end: defaultEnd(),
+        variations: [],
+        media_urls: [],
+        pendingMedia: [],
+      });
+      setBaseMessage("");
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+    setStep(1);
+  }, [open]); // eslint-disable-line
 
   // ─── Media handlers ───────────────────────────────────────────────────────
 
@@ -319,6 +336,25 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
   const validVariationsCount = form.variations.filter(v => v.trim().length > 0).length;
 
   // ─── Render ───────────────────────────────────────────────────────────────
+
+  if (renderError) {
+    return (
+      <Dialog open={open} onOpenChange={o => { if (!o) { onClose(); setStep(1); } }}>
+        <DialogContent className="sm:max-w-[400px] bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground">Erro ao carregar</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/30 rounded-lg">
+            <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+            <p className="text-sm text-muted-foreground">{renderError}</p>
+          </div>
+          <div className="flex justify-end pt-2 border-t border-border">
+            <Button variant="outline" onClick={onClose}>Fechar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) { onClose(); setStep(1); } }}>

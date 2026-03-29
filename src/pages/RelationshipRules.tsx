@@ -16,8 +16,9 @@ interface Rule {
   channel: string;
   active: boolean;
   message_template: string;
-  campaign_start?: string;
-  campaign_end?: string;
+  campaign_start?: string | null;
+  campaign_end?: string | null;
+  media_urls?: string[] | null;
 }
 
 interface Execution {
@@ -179,21 +180,27 @@ export default function RelationshipRules() {
   // ─── Edit (carrega também as variações) ───────────────────────────────────
 
   const handleEdit = async (rule: Rule) => {
-    let variations: string[] = [];
     try {
-      const { data: varData } = await (supabase as any)
-        .from("relationship_message_variations")
-        .select("content, variation_number")
-        .eq("rule_id", rule.id)
-        .order("variation_number", { ascending: true });
+      let variations: string[] = [];
+      try {
+        const { data: varData } = await (supabase as any)
+          .from("relationship_message_variations")
+          .select("content, variation_number")
+          .eq("rule_id", rule.id)
+          .order("variation_number", { ascending: true });
 
-      variations = (varData || []).map((v: any) => v.content || "");
+        variations = (varData || []).map((v: any) => v.content || "");
+      } catch {
+        // Fallback: pega do message_template com |||
+        variations = (rule.message_template || "").split("|||").map((s: string) => s.trim()).filter(Boolean);
+      }
+      setEditingRule({ ...rule, variations, media_urls: (rule as any).media_urls || [], pendingMedia: [] });
     } catch {
-      // Fallback: pega do message_template com |||
-      variations = (rule.message_template || "").split("|||").map((s: string) => s.trim()).filter(Boolean);
+      // If anything fails, still open wizard with whatever data we have
+      setEditingRule({ ...rule, variations: [], media_urls: (rule as any).media_urls || [], pendingMedia: [] });
+    } finally {
+      setWizardOpen(true);
     }
-    setEditingRule({ ...rule, variations, media_urls: rule.media_urls || [], pendingMedia: [] });
-    setWizardOpen(true);
   };
 
   // ─── Duplicate ─────────────────────────────────────────────────────────────
@@ -348,6 +355,7 @@ export default function RelationshipRules() {
 
       {/* Wizard */}
       <RuleWizard
+        key={editingRule?.id || "new-rule"}
         open={wizardOpen}
         onClose={() => { setWizardOpen(false); setEditingRule(undefined); }}
         onSave={handleSave}
