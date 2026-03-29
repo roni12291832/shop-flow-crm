@@ -513,8 +513,53 @@ async def receive_whatsapp_message(request: Request):
                         opportunity_action = "create_failed"
                         logger.error("Falha ao criar oportunidade para %s: %s", push_name, ins)
 
-                elif existing_opp["stage"] not in ("comprador", "perdido", "desqualificado"):
-                    # Oportunidade em etapa ativa → analisa mensagem
+                elif existing_opp["stage"] == "comprador":
+                    # Lógica de Avaliação Pós-Venda (Google Meu Negócio)
+                    opportunity_action = "existing_comprador_review_check"
+                    try:
+                        from openai import AsyncOpenAI
+                        from config import get_settings
+                        _client = AsyncOpenAI(api_key=get_settings().openai_api_key)
+                        prompt = f"""O cliente acabou de fazer uma compra e foi solicitado a avaliar a experiência.
+Mensagem do cliente: {message_text}
+
+Responda APENAS "SIM" se for um feedback positivo/elogio explícito sobre a compra/loja, ou "NAO" se for negativo, neutro, dúvida ou qualquer outra coisa. Seja estrito: só diga SIM para elogios reais."""
+                        
+                        response = await _client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.0,
+                            max_tokens=10,
+                        )
+                        content = (response.choices[0].message.content or "").strip().upper()
+                        
+                        if "SIM" in content:
+                            gmb_res = db.table("tenants").select("google_mybusiness_url").limit(1).execute()
+                            gmb_link = ""
+                            if gmb_res.data and gmb_res.data[0].get("google_mybusiness_url"):
+                                gmb_link = gmb_res.data[0]["google_mybusiness_url"]
+                            
+                            if gmb_link:
+                                reply_msg = f"Ficamos muito felizes que gostou! 😍\nVocê poderia nos avaliar no Google rapidinho? Isso nos ajuda muito!\n👉 {gmb_link}"
+                                wp_res = db.table("whatsapp_instances").select("*").eq("status", "connected").limit(1).execute()
+                                if wp_res.data:
+                                    wp = wp_res.data[0]
+                                    await uazapi.send_text(
+                                        api_url=wp["api_url"],
+                                        api_token=wp["api_token"],
+                                        instance_name=wp["instance_name"],
+                                        phone=phone,
+                                        message=reply_msg,
+                                        instance_token=wp.get("instance_token")
+                                    )
+                                    logger.info("Feedback positivo de comprador %s — link GMB enviado!", phone)
+                                    opportunity_action = "existing_comprador_gmb_sent"
+                    except Exception as e:
+                        logger.warning("Falha ao analisar feedback de comprador: %s", e)
+                        opportunity_action = f"existing_comprador_error_{e}"
+
+                elif existing_opp["stage"] not in ("perdido", "desqualificado"):
+                    # Oportunidade em etapa ativa (lead_novo, contato_iniciado, interessado) → analisa mensagem
                     old_stage = existing_opp["stage"]
                     opportunity_action = f"existing_{old_stage}"
 
