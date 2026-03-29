@@ -11,10 +11,10 @@ import { toast } from "sonner";
 
 /**
  * URL do webhook do backend Python.
- * Lida pelo banco de dados (whatsapp_instances.webhook_url) ou por variável de ambiente.
- * Fallback para o deploy atual no Koyeb.
+ * Lida pelo banco de dados (whatsapp_instances.webhook_url) ou variável de ambiente.
+ * Fallback constroi a URL baseada na VITE_API_URL se VITE_WEBHOOK_URL estiver vazio.
  */
-const DEFAULT_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || "";
+const DEFAULT_WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL || (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/webhook/uzapi` : "");
 
 export default function WhatsAppConnect() {
   const navigate = useNavigate();
