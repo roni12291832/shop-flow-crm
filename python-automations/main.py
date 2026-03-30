@@ -21,7 +21,7 @@ from config import get_settings
 from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
-from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads
+from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads, job_send_post_sale_nps
 from finance_notifications import job_finance_notifications
 from jarvis_agent import jarvis
 _IMPORT_ERROR = None
@@ -135,6 +135,15 @@ async def lifespan(app: FastAPI):
             name="Motor de Follow-Up Automático",
             replace_existing=True,
         )
+
+    # Motor de NPS pós-venda (a cada 1 minuto)
+    scheduler.add_job(
+        job_send_post_sale_nps,
+        IntervalTrigger(minutes=1),
+        id="nps_after_sale",
+        name="NPS Pós-Venda Automático",
+        replace_existing=True,
+    )
 
     # Régua de relacionamento — a cada 30 minutos
     if _REGUA_ENABLED and job_regua_relacionamento:

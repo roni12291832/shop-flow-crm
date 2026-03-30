@@ -442,6 +442,46 @@ async def receive_whatsapp_message(request: Request):
                     await cancel_pending_for_client(client_id, reason="cliente_respondeu")
                 except Exception as _ce:
                     logger.warning("Erro ao cancelar follow-ups (não crítico): %s", _ce)
+
+                # ── INTERCEPTAÇÃO DE NPS ───────────────────────────────────────
+                try:
+                    survey_res = db.table("nps_surveys").select("id").eq("customer_id", client_id).eq("status", "sent").execute()
+                    if survey_res.data:
+                        survey_id = survey_res.data[0]["id"]
+                        logger.info("Processando resposta %s como NPS para o client %s", message_text, client_id)
+                        
+                        # Processa com a IA
+                        from nps_agent import process_nps_response
+                        nps_result = await process_nps_response(survey_id, message_text)
+                        
+                        cls = nps_result.get("classification")
+                        sent = nps_result.get("sentiment")
+
+                        import uazapi_client
+                        db_inst = db.table("whatsapp_instances").select("*").eq("status", "connected").limit(1).execute()
+                        if db_inst.data:
+                            i = db_inst.data[0]
+                            # Positivo: manda pro Google
+                            if cls == "promotor" or sent == "positivo":
+                                gmb_res = db.table("tenants").select("google_mybusiness_url").limit(1).execute()
+                                gmb_url = gmb_res.data[0].get("google_mybusiness_url") if gmb_res.data else ""
+                                if gmb_url:
+                                    reply = f"Ficamos muito felizes que tenha gostado! 🥰 Você pode nos ajudar avaliando a loja no Google usando esse link?\n\n{gmb_url}\n\nMuito obrigado pela confiança!"
+                                    await uazapi_client.uazapi.send_text(i["api_url"], i["api_token"], i["instance_name"], phone, reply)
+                                else:
+                                    reply = "Ficamos muito felizes que tenha gostado! 🥰 Muito obrigado pela confiança e volte sempre!"
+                                    await uazapi_client.uazapi.send_text(i["api_url"], i["api_token"], i["instance_name"], phone, reply)
+                            
+                            # Negativo: pede desculpas e evita enviar link
+                            elif cls == "detrator" or sent == "negativo":
+                                reply = "Poxa, sentimos muito pela sua experiência. 😔 Já acionamos a gerência para verificar o que houve e resolver qualquer problema. Agradecemos o feedback sincero para continuarmos melhorando!"
+                                await uazapi_client.uazapi.send_text(i["api_url"], i["api_token"], i["instance_name"], phone, reply)
+                        
+                        # Interrompe o fluxo para que a automação de leads (watcher_agent) não tente mover o card
+                        return {"status": "ok", "message": "NPS response processed"}
+                except Exception as e:
+                    logger.error("Erro ao interceptar NPS: %s", e)
+
             except Exception as e:
                 err_str = str(e).lower()
                 # ─── Detecção de UNIQUE violation ───────────────────────────────

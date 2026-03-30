@@ -287,3 +287,97 @@ async def job_notify_stale_leads():
             message=msg,
         )
         logger.info("Alerta de leads parados enviado (%d leads)", len(stale))
+
+
+async def job_send_post_sale_nps():
+    """
+    Envia pedido de avaliação via WhatsApp 3 minutos após
+    o registro de uma nova venda (status='confirmado').
+    """
+    async with registrar_automacao("nps_pos_venda_3min"):
+        db = get_supabase()
+
+        # Janela: vendas confirmadas nos últimos 60 minutos, e com >= 3 minutos de idade
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=3)
+        start_window = datetime.now(timezone.utc) - timedelta(minutes=60)
+        
+        sales_res = (
+            db.table("sales_entries")
+            .select("id, customer_id, created_at")
+            .eq("status", "confirmado")
+            .gte("created_at", start_window.isoformat())
+            .lte("created_at", cutoff.isoformat())
+            .execute()
+        )
+        sales = sales_res.data or []
+        if not sales:
+            return
+
+        # Pega IDs das vendas que já receberam NPS (para evitar duplicatas)
+        sale_ids = [s["id"] for s in sales]
+        sent_res = (
+            db.table("nps_surveys")
+            .select("reference_id")
+            .in_("reference_id", sale_ids)
+            .execute()
+        )
+        sent_ids = {s.get("reference_id") for s in (sent_res.data or []) if s.get("reference_id")}
+
+        pending_sales = [s for s in sales if s["id"] not in sent_ids]
+        if not pending_sales:
+            return
+
+        instance_res = (
+            db.table("whatsapp_instances")
+            .select("api_url, api_token, instance_name")
+            .eq("status", "connected")
+            .limit(1)
+            .execute()
+        )
+        if not instance_res.data:
+            return
+        inst = instance_res.data[0]
+
+        ativos = 0
+        for sale in pending_sales:
+            # Pega dados do cliente para personalizar mensagem
+            cl_res = db.table("clients").select("id, name, phone, tenant_id").eq("id", sale["customer_id"]).execute()
+            if not cl_res.data:
+                continue
+            client = cl_res.data[0]
+            phone = client.get("phone")
+            name = client.get("name") or "Cliente"
+            first_name = name.split()[0]
+            if not phone:
+                continue
+
+            # Registra no BD que enviamos a survey
+            # Adicionamos status=sent e triggered_by=after_sale
+            survey_data = {
+                "tenant_id": client.get("tenant_id"),
+                "customer_id": client["id"],
+                "triggered_by": "after_sale",
+                "reference_id": sale["id"],
+                "status": "sent"
+            }
+            res_survey = db.table("nps_surveys").insert(survey_data).execute()
+            if not res_survey.data:
+                logger.warning("Falha ao registrar envio de NPS no BD para %s", phone)
+                continue
+
+            msg = f"Oi {first_name}! Tudo bem?\n\nPercebemos que você fez uma compra com a gente agora pouco. Como foi a sua experiência na loja hoje? Se puder responder aqui, nos ajuda muito a melhorar (basta enviar como foi)!"
+            
+            if DRY_RUN:
+                logger.info("[DRY_RUN] Enviaria NPS (3min pos-venda) para %s", phone)
+            else:
+                try:
+                    await uazapi.send_text(
+                        inst["api_url"], inst["api_token"], inst["instance_name"], phone, msg
+                    )
+                    ativos += 1
+                except Exception as e:
+                    logger.error("Erro enviando NPS 3min para %s: %s", phone, e)
+
+        if ativos > 0:
+            logger.info("Enviadas %d mensagens de NPS pós-venda (3 min)", ativos)
+
