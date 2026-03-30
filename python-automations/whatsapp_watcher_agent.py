@@ -71,17 +71,16 @@ Retorne SOMENTE um JSON (sem texto adicional, sem markdown):
 }
 
 Classificação dos estágios:
-- "contato_iniciado": conversando de forma genérica, sem perguntar sobre produto específico (ex: "oi", "tudo bem?", "ainda tem promoção?", "como funciona o site?")
-- "interessado": perguntou sobre produto específico — tamanho, cor, preço, estoque, foto, medidas, prazo de entrega, formas de pagamento de um produto (ex: "tem a calça X no 40?", "quanto custa o vestido?", "tem em outras cores?")
-- "comprador": confirmou que quer comprar, pediu PIX/link de pagamento, informou endereço de entrega, enviou comprovante, agradeceu pela compra (ex: "vou levar", "me passa o PIX", "meu endereço é...", "obrigada pela compra")
-- "perdido": explicitamente desistiu, achou caro sem continuidade, disse que não quer mais, bloqueou ou foi grosseiro (ex: "não tenho interesse", "muito caro, obrigado", "não quero mais")
+- "contato_iniciado": conversando de forma genérica, comprimentos ou dúvidas amplas. (Ex: "oi", "tudo bem?", "bom dia", "boa tarde", "boa noite", "ainda tem promoção?", "como funciona a loja?")
+- "interessado": APENAS se perguntou explicitamente sobre um PRODUTO ESPECÍFICO — tamanho, cor, preço, estoque, foto, medidas ou opções de um item. (Ex: "tem a calça X no 40?", "quanto custa o vestido da foto?", "tem em outras cores aquele modelo?")
+- "comprador": confirmou que quer comprar, pediu forma de pagamento (PIX/link), informou endereço, ou enviou comprovante. (Ex: "vou levar", "me passa o PIX", "meu CEP é...", "já paguei, segue o recibo")
+- "perdido": explicitamente desistiu, recusou o preço sem negociação, bloqueou ou foi rude. (Ex: "não tenho interesse", "achei muito caro, deixa pra lá", "não quero mais")
 
-Dicas:
-- Confidence >= 0.85 apenas quando tiver CERTEZA pelo contexto completo
-- Confidence entre 0.7-0.84 quando a intenção é clara mas poderia ter outra interpretação
-- Confidence < 0.7 quando ambíguo (o sistema não moverá o lead nesses casos)
-- Prefira avançar o lead se a mensagem tiver qualquer sinal de interesse em produto específico
-- "perdido" deve ser usado com parcimônia — apenas quando explícito e definitivo"""
+REGRAS DE OURO:
+1. Mensagens como "Bom dia", "Oi", "Boa tarde", "Gostaria de saber", SEM NOMEAR ou indicar um produto específico SÃO SEMPRE "contato_iniciado" com confiança 1.0.
+2. NUNCA classifique como "interessado" alguém que apenas deu "Bom dia" ou mandou um emoji.
+3. Se a mensagem do usuário for genérica e não tiver histórico claro, MANTENHA "contato_iniciado".
+"""
 
 
 async def analyze_and_move_lead(

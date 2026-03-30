@@ -655,7 +655,11 @@ Responda APENAS "SIM" se for um feedback positivo/elogio explícito sobre a comp
 
             # analyze_client_intent retorna True/False/None
             # None = IA indisponível — não penaliza o lead, apenas pula a resposta automática
-            intent = await jarvis.analyze_client_intent(message_text) if message_text else False
+            if is_new:
+                logger.info("Cliente novo (primeira mensagem): Pulando IA (Jarvis) por regra de negócio.")
+                intent = False
+            else:
+                intent = await jarvis.analyze_client_intent(message_text) if message_text else False
 
             reply = None
             if intent is not False:  # True ou None (incerto) → tenta responder
