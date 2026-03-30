@@ -204,7 +204,7 @@ export default function FollowUp() {
   // Load GMB from Supabase
   const [tenantId, setTenantId] = useState<string | null>(null);
   useEffect(() => {
-    supabase.from("tenants").select("id, google_mybusiness_url").single().then(({ data }) => {
+    supabase.from("tenants" as any).select("id, google_mybusiness_url").single().then(({ data }: any) => {
       if (data) {
         setTenantId(data.id);
         if (data.google_mybusiness_url) setGmbUrl(data.google_mybusiness_url);
@@ -215,7 +215,7 @@ export default function FollowUp() {
   async function saveGmb() {
     if (!tenantId) { toast.error("Configuração não carregada ainda"); return; }
     setSavingGmb(true);
-    const { error } = await supabase.from("tenants").update({ google_mybusiness_url: gmbUrl } as any).eq("id", tenantId);
+    const { error } = await supabase.from("tenants" as any).update({ google_mybusiness_url: gmbUrl } as any).eq("id", tenantId);
     setSavingGmb(false);
     if (error) { toast.error("Erro ao salvar: " + error.message); return; }
     toast.success("Link do Google Meu Negócio salvo!");
@@ -286,7 +286,7 @@ export default function FollowUp() {
     try {
       // Salva direto no Supabase — evita dependência do backend Python para CRUD simples
       const { error: delError } = await supabase
-        .from("stage_followup_messages")
+        .from("stage_followup_messages" as any)
         .delete()
         .eq("step_id", step.id);
       if (delError) throw new Error(delError.message);
@@ -297,7 +297,7 @@ export default function FollowUp() {
         message: message.trim(),
       }));
       const { error: insError } = await supabase
-        .from("stage_followup_messages")
+        .from("stage_followup_messages" as any)
         .insert(rows);
       if (insError) throw new Error(insError.message);
 
@@ -471,9 +471,9 @@ export default function FollowUp() {
             <Star className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
             <div className="flex-1 space-y-2">
               <div>
-                <p className="text-sm font-medium">Google Meu Negócio</p>
+                <p className="text-sm font-medium">Google Meu Negócio & NPS Pós-Venda</p>
                 <p className="text-xs text-muted-foreground">
-                  Link da página de avaliações. Use <code className="bg-muted px-1 rounded">{"{gmb_link}"}</code> nas mensagens do step "Comprador" para enviar automaticamente.
+                  Link da página de avaliações. O sistema envia automaticamente 3 minutos após o pedido e entrega este link apenas para os clientes que avaliarem positivamente a loja.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -519,8 +519,10 @@ export default function FollowUp() {
 
       {/* Métricas */}
       {metrics && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {Object.entries(metrics.stages).map(([stage, data]) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {Object.entries(metrics.stages)
+            .filter(([stage]) => stage !== "comprador")
+            .map(([stage, data]) => (
             <Card key={stage}>
               <CardContent className="pt-4 pb-3">
                 <p className={`text-xs font-medium mb-2 ${STAGE_COLORS[stage]}`}>{data.label}</p>
@@ -550,7 +552,7 @@ export default function FollowUp() {
       ) : !backendError ? (
         <Tabs defaultValue="contato_iniciado">
           <TabsList className="mb-4">
-            {["contato_iniciado", "interessado", "comprador"].map(stage => {
+            {["contato_iniciado", "interessado"].map(stage => {
               const steps = config[stage] || [];
               const allOk = steps.length > 0 && steps.every(s => s.has_minimum);
               return (
@@ -565,13 +567,12 @@ export default function FollowUp() {
             })}
           </TabsList>
 
-          {["contato_iniciado", "interessado", "comprador"].map(stage => (
+          {["contato_iniciado", "interessado"].map(stage => (
             <TabsContent key={stage} value={stage}>
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
                   {stage === "contato_iniciado" && "Disparado quando o lead é movido para 'Contato Iniciado'. Após o último step sem resposta, o lead vai automaticamente para 'Perdido'."}
                   {stage === "interessado" && "Disparado quando o lead avança para 'Interessado'. Todos os follow-ups de etapas anteriores são cancelados automaticamente."}
-                  {stage === "comprador" && "Disparado quando o lead vira comprador. Envia mensagem de satisfação e redireciona para avaliação no Google. Use {gmb_link} nas mensagens."}
                 </p>
                 {(config[stage] || []).length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border rounded-lg">

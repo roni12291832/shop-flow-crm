@@ -216,7 +216,10 @@ export default function Reports() {
                   {paymentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
                 <Tooltip formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                  labelStyle={{ color: "hsl(var(--foreground))" }}
+                  itemStyle={{ color: "hsl(var(--foreground))" }}
+                />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3">
@@ -243,7 +246,10 @@ export default function Reports() {
               <XAxis type="number" stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
               <YAxis type="category" dataKey="name" stroke="hsl(var(--muted-foreground))" width={120} tick={{ fontSize: 12 }} />
               <Tooltip formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                labelStyle={{ color: "hsl(var(--foreground))" }}
+                itemStyle={{ color: "hsl(var(--foreground))" }}
+              />
               <Bar dataKey="revenue" fill="hsl(var(--chart-1))" radius={[0, 6, 6, 0]} name="Receita" />
             </BarChart>
           </ResponsiveContainer>
@@ -256,7 +262,10 @@ export default function Reports() {
               <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 11 }} interval={Math.max(0, Math.floor(dailyData.length / 10))} />
               <YAxis stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
               <Tooltip formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                labelStyle={{ color: "hsl(var(--foreground))" }}
+                itemStyle={{ color: "hsl(var(--foreground))" }}
+              />
               <Line type="monotone" dataKey="revenue" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 3, fill: "hsl(var(--chart-2))" }} name="Receita" />
             </LineChart>
           </ResponsiveContainer>

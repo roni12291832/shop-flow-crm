@@ -210,7 +210,7 @@ export default function Pipeline() {
                   <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2"><Label>Valor (R$)</Label><Input type="number" step="0.01" value={form.estimated_value} onChange={(e) => setForm({ ...form, estimated_value: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Valor da negociação (R$)</Label><Input type="number" step="0.01" value={form.estimated_value} onChange={(e) => setForm({ ...form, estimated_value: e.target.value })} /></div>
               <Button type="submit" className="w-full">Criar Oportunidade</Button>
             </form>
           </DialogContent>
@@ -298,7 +298,7 @@ export default function Pipeline() {
             <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider pt-2 border-t border-border">Oportunidade</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2"><Label>Título</Label><Input value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} /></div>
-              <div className="space-y-1.5 col-span-2"><Label>Valor estimado (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
+              <div className="space-y-1.5 col-span-2"><Label>Valor da negociação (R$)</Label><Input type="number" step="0.01" value={editForm.estimated_value} onChange={e => setEditForm({ ...editForm, estimated_value: e.target.value })} /></div>
             </div>
             <Button onClick={handleEdit} className="w-full">Salvar</Button>
           </div>

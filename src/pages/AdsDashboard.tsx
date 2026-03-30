@@ -295,6 +295,8 @@ export default function AdsDashboard() {
                     <Tooltip
                       formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
                     />
                     <Area type="monotone" dataKey="spend" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.15} strokeWidth={2} name="Investimento" />
                   </AreaChart>
@@ -313,7 +315,10 @@ export default function AdsDashboard() {
                           {platformData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                         </Pie>
                         <Tooltip formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-                          contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                          contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                          labelStyle={{ color: "hsl(var(--foreground))" }}
+                          itemStyle={{ color: "hsl(var(--foreground))" }}
+                        />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="space-y-2 mt-2">
@@ -347,7 +352,10 @@ export default function AdsDashboard() {
                     <XAxis type="number" stroke="hsl(var(--muted-foreground))" tickFormatter={v => `R$${v}`} />
                     <YAxis type="category" dataKey="name" stroke="hsl(var(--muted-foreground))" width={150} tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                    />
                     <Bar dataKey="spend" fill="hsl(var(--chart-1))" radius={[0, 6, 6, 0]} name="Investimento" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -412,7 +420,11 @@ export default function AdsDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis dataKey="dateLabel" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 11 }} />
                     <YAxis stroke="hsl(var(--muted-foreground))" />
-                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                    <Tooltip 
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                    />
                     <Legend />
                     <Line type="monotone" dataKey="clicks" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 2 }} name="Cliques" />
                     <Line type="monotone" dataKey="conversions" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ r: 2 }} name="Conversões" />
@@ -428,7 +440,10 @@ export default function AdsDashboard() {
                     <XAxis dataKey="dateLabel" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 11 }} />
                     <YAxis stroke="hsl(var(--muted-foreground))" tickFormatter={v => `${v}x`} />
                     <Tooltip formatter={(v: number) => `${v.toFixed(2)}x`}
-                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                    />
                     <Area type="monotone" dataKey="roas" stroke="hsl(160, 84%, 39%)" fill="hsl(160, 84%, 39%)" fillOpacity={0.1} strokeWidth={2} name="ROAS" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -442,7 +457,10 @@ export default function AdsDashboard() {
                     <XAxis dataKey="dateLabel" stroke="hsl(var(--muted-foreground))" tick={{ fontSize: 11 }} />
                     <YAxis stroke="hsl(var(--muted-foreground))" tickFormatter={v => `${v}%`} />
                     <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`}
-                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }} />
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 10, color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                    />
                     <Line type="monotone" dataKey="ctr" stroke="hsl(var(--chart-3))" strokeWidth={2} dot={{ r: 2 }} name="CTR" />
                   </LineChart>
                 </ResponsiveContainer>

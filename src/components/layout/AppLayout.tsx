@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const PAGE_TITLES: Record<string, { title: string; sub: string }> = {
   "/": { title: "Dashboard", sub: "Visão geral do negócio" },
@@ -128,6 +129,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <span className="text-muted-foreground text-[13px] hidden sm:inline">{pageInfo.sub}</span>
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <Button
               variant="outline"
               size="sm"

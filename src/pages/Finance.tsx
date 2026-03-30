@@ -89,10 +89,10 @@ export default function Finance() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data: lancamentosData, error } = await supabase
-        .from("lancamentos")
+      const { data: lancamentosData, error } = await (supabase
+        .from("lancamentos" as any)
         .select("*")
-        .order("data_vencimento", { ascending: false });
+        .order("data_vencimento", { ascending: false }) as any);
 
       if (error) throw error;
       setData(lancamentosData || []);
@@ -176,7 +176,11 @@ export default function Finance() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                     <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} />
                     <YAxis fontSize={10} axisLine={false} tickLine={false} tickFormatter={(v) => `R$ ${v/1000}k`} />
-                    <Tooltip />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: '8px' }}
+                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      itemStyle={{ color: "hsl(var(--foreground))" }}
+                    />
                     <Area type="monotone" dataKey="saldo" stroke="#3b82f6" fillOpacity={1} fill="url(#colorSaldo)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -195,7 +199,11 @@ export default function Finance() {
                                 <Cell fill="#3b82f6" />
                                 <Cell fill="#f59e0b" />
                             </Pie>
-                            <Tooltip />
+                            <Tooltip 
+                              contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: '8px' }}
+                              labelStyle={{ color: "hsl(var(--foreground))" }}
+                              itemStyle={{ color: "hsl(var(--foreground))" }}
+                            />
                         </PieChart>
                     </ResponsiveContainer>
                 </div>
@@ -268,10 +276,10 @@ function TransactionTable({ data, onUpdate }: { data: any[], onUpdate: () => voi
         const dataPagamento = newStatus === 'pago' ? new Date().toISOString().split('T')[0] : null;
 
         try {
-            const { error } = await supabase
-                .from("lancamentos")
+            const { error } = await (supabase
+                .from("lancamentos" as any)
                 .update({ status: newStatus, data_pagamento: dataPagamento })
-                .eq("id", item.id);
+                .eq("id", item.id) as any);
             
             if (error) throw error;
             toast.success("Lançamento atualizado!");
@@ -450,14 +458,14 @@ function AddTransactionDialog({ isOpen, onClose, onSuccess }: any) {
 
     const handleSave = async () => {
         try {
-            const { error } = await supabase.from("lancamentos").insert({
+            const { error } = await (supabase.from("lancamentos" as any).insert({
                 tipo,
                 categoria,
                 valor,
                 descricao: desc,
                 data_vencimento: venc,
                 status: 'pendente'
-            });
+            }) as any);
             if (error) throw error;
             toast.success("Lançamento criado!");
             onSuccess();
@@ -503,12 +511,12 @@ function CashClosingDialog({ isOpen, onClose, onSuccess, summary }: any) {
 
     const handleClose = async () => {
         try {
-            const { error } = await supabase.from("fechamentos_caixa").insert({
+            const { error } = await (supabase.from("fechamentos_caixa" as any).insert({
                 data: new Date().toISOString().split('T')[0],
                 total_entradas: entradas,
                 total_saidas: saidas,
                 saldo_fechamento: entradas - saidas
-            });
+            }) as any);
             if (error) throw error;
             toast.success("Caixa fechado com sucesso!");
             onSuccess();

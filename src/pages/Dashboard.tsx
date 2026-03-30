@@ -149,7 +149,7 @@ export default function Dashboard() {
       // 4. Team & Client Performance
       const { data: profiles } = await supabase.from("profiles").select("*").limit(50);
       const { data: clients } = await supabase.from("clients").select("id, name, origin, ticket_medio, last_purchase, created_at").limit(200);
-      const { data: npsSurveys } = await supabase.from("nps_surveys").select("score, classification, responded_at").eq("status", "responded").limit(100);
+      const { data: npsSurveys } = await supabase.from("nps_surveys").select("score, category, responded_at").eq("status", "responded").limit(100);
 
       const newClients = (clients || []).filter(c => new Date(c.created_at) >= monthStart).length;
       
@@ -318,6 +318,8 @@ export default function Dashboard() {
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => `R$${v}`} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: '12px' }}
+                  labelStyle={{ color: "hsl(var(--foreground))" }}
+                  itemStyle={{ color: "hsl(var(--foreground))" }}
                   formatter={(v: number) => [formatBRL(v), "Faturamento"]}
                 />
                 <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ r: 4, fill: "hsl(var(--primary))", strokeWidth: 2, stroke: "hsl(var(--background))" }} activeDot={{ r: 6 }} />

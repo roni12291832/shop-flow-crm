@@ -47,7 +47,8 @@ export function GoalComparisonCard({ title, realized, target, previousRealized, 
             <BarChart data={dailyData}>
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                labelStyle={{ color: "hsl(var(--muted-foreground))" }}
+                labelStyle={{ color: "hsl(var(--foreground))" }}
+                itemStyle={{ color: "hsl(var(--foreground))" }}
                 formatter={(v: number) => [`R$${v.toLocaleString("pt-BR")}`, "Valor"]}
               />
               <Bar dataKey="value" fill={color} radius={[2, 2, 0, 0]} />
