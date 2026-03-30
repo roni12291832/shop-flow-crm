@@ -35,7 +35,7 @@ interface ClientDetailDrawerProps {
 }
 
 export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: ClientDetailDrawerProps) {
-    const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "", tags: "" });
+  const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "", tags: "", birth_date: "" });
   const [opportunities, setOpportunities] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
@@ -53,6 +53,7 @@ export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: C
           name: client.name || "", phone: client.phone || "", email: client.email || "",
           city: client.city || "", origin: client.origin || "outro", notes: client.notes || "",
           tags: (client.tags || []).join(", "),
+          birth_date: client.birth_date || "",
         });
       }
       setOpportunities(opps || []);
@@ -68,6 +69,7 @@ export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: C
     const { error } = await supabase.from("clients").update({
       name: form.name, phone: form.phone || null, email: form.email || null,
       city: form.city || null, origin: form.origin as any, notes: form.notes || null, tags,
+      birth_date: form.birth_date || null,
     }).eq("id", clientId);
     setSaving(false);
     if (error) toast.error("Erro ao salvar");
@@ -92,15 +94,21 @@ export function ClientDetailDrawer({ clientId, open, onOpenChange, onUpdate }: C
         <SheetHeader>
           <SheetTitle>Detalhes do Cliente</SheetTitle>
         </SheetHeader>
-        <div className="space-y-5 mt-6">
-          <div className="space-y-2"><Label>Nome *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+        <div className="space-y-4 mt-6">
+          <div className="space-y-1.5"><Label className={!form.name ? "text-red-500 font-bold" : ""}>Nome *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={!form.name ? "border-red-500 focus-visible:ring-red-500" : ""} /></div>
+          
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2"><Label>Telefone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Email</Label><Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+            <div className="space-y-1.5"><Label className={!form.phone ? "text-red-500 font-bold" : ""}>Telefone *</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className={!form.phone ? "border-red-500" : ""} /></div>
+            <div className="space-y-1.5"><Label className={!form.email ? "text-red-500 font-bold" : ""}>Email *</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className={!form.email ? "border-red-500" : ""} /></div>
           </div>
+          <div className="space-y-1.5">
+            <Label className={!form.birth_date ? "text-red-500 font-bold" : ""}>Data de Nascimento *</Label>
+            <Input type="date" value={form.birth_date} onChange={e => setForm({ ...form, birth_date: e.target.value })} className={!form.birth_date ? "border-red-500" : ""} />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2"><Label>Cidade</Label><Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Origem</Label>
+            <div className="space-y-1.5"><Label className={!form.city ? "text-red-500 font-bold" : ""}>Cidade *</Label><Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} className={!form.city ? "border-red-500" : ""} /></div>
+            <div className="space-y-1.5"><Label>Origem</Label>
               <Select value={form.origin} onValueChange={v => setForm({ ...form, origin: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{ORIGINS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>

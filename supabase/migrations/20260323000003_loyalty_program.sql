@@ -75,9 +75,9 @@ BEGIN
   
   -- 2. Verificar se é aniversário do cliente
   SELECT * INTO v_cliente FROM public.clients WHERE id = NEW.customer_id;
-  IF v_cliente.birthday IS NOT NULL AND 
-     EXTRACT(MONTH FROM v_cliente.birthday) = EXTRACT(MONTH FROM CURRENT_DATE) AND 
-     EXTRACT(DAY FROM v_cliente.birthday) = EXTRACT(DAY FROM CURRENT_DATE) THEN
+  IF v_cliente.birth_date IS NOT NULL AND 
+     EXTRACT(MONTH FROM v_cliente.birth_date) = EXTRACT(MONTH FROM CURRENT_DATE) AND 
+     EXTRACT(DAY FROM v_cliente.birth_date) = EXTRACT(DAY FROM CURRENT_DATE) THEN
      v_mult := 2; -- Pontos em Dobro!
   END IF;
 
@@ -116,7 +116,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS trg_process_loyalty_on_sale ON public.sales_entries;
+
 CREATE TRIGGER trg_process_loyalty_on_sale
-  AFTER INSERT ON public.sales_entries
+  AFTER INSERT OR UPDATE OF status ON public.sales_entries
   FOR EACH ROW
   EXECUTE FUNCTION public.process_loyalty_on_sale();

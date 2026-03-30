@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { ClientDetailDrawer } from "@/components/crm/ClientDetailDrawer";
 
 const ORIGINS = [
   { value: "whatsapp", label: "WhatsApp" },
@@ -49,7 +50,7 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   const [products, setProducts] = useState<{ id: string; name: string; sell_price: number; current_stock: number; unit: string }[]>([]);
   const [search, setSearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
-  const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null);
+  const [selectedClient, setSelectedClient] = useState<any | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [manualValue, setManualValue] = useState("");
   const [useProducts, setUseProducts] = useState(false);
@@ -58,10 +59,11 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
-  const [ncForm, setNcForm] = useState({ name: "", phone: "", origin: "loja_fisica" });
+  const [missingInfoOpen, setMissingInfoOpen] = useState(false);
+  const [ncForm, setNcForm] = useState({ name: "", phone: "", email: "", city: "", origin: "loja_fisica", birth_date: "" });
 
   useEffect(() => {
-    supabase.from("clients").select("id, name").order("name")
+    supabase.from("clients").select("id, name, phone, email, city, birth_date").order("name")
       .then(({ data }) => setClients(data || []));
     supabase.from("products").select("id, name, sell_price, current_stock, unit")
       .eq("active", true).order("name")
@@ -111,6 +113,14 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
 
   const handleSubmit = async () => {
     if (!selectedClient || totalValue <= 0 || !user) return;
+    
+    // Check missing info needed for loyalty and registration
+    if (!selectedClient.phone || !selectedClient.email || !selectedClient.city || !selectedClient.birth_date) {
+      toast.warning("Complete o cadastro do cliente antes de finalizar a venda.");
+      setMissingInfoOpen(true);
+      return;
+    }
+
     setSaving(true);
 
     // Create sale entry
@@ -180,17 +190,20 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
     e.preventDefault();
     if (!ncForm.name) return;
     const { data, error } = await supabase.from("clients").insert({
-            name: ncForm.name,
+      name: ncForm.name,
       phone: ncForm.phone || null,
+      email: ncForm.email || null,
+      city: ncForm.city || null,
+      birth_date: ncForm.birth_date || null,
       origin: ncForm.origin as any
-    }).select("id, name").single();
+    }).select("id, name, phone, email, city, birth_date").single();
 
     if (error) { toast.error("Erro ao criar cliente"); return; }
     toast.success("Cliente salvo!");
     setClients(prev => [...prev, data]);
     setSelectedClient(data);
     setNewClientOpen(false);
-    setNcForm({ name: "", phone: "", origin: "loja_fisica" });
+    setNcForm({ name: "", phone: "", email: "", city: "", origin: "loja_fisica", birth_date: "" });
   };
 
   if (success) {
@@ -342,9 +355,25 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
                     <Label>Nome *</Label>
                     <Input autoFocus value={ncForm.name} onChange={e => setNcForm({...ncForm, name: e.target.value})} required />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Telefone (WhatsApp)</Label>
-                    <Input value={ncForm.phone} onChange={e => setNcForm({...ncForm, phone: e.target.value})} placeholder="DD NÚMERO" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Telefone</Label>
+                      <Input value={ncForm.phone} onChange={e => setNcForm({...ncForm, phone: e.target.value})} placeholder="DD NÚMERO" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input type="email" value={ncForm.email} onChange={e => setNcForm({...ncForm, email: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Cidade</Label>
+                      <Input value={ncForm.city} onChange={e => setNcForm({...ncForm, city: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Nascimento</Label>
+                      <Input type="date" value={ncForm.birth_date} onChange={e => setNcForm({...ncForm, birth_date: e.target.value})} />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label>Origem</Label>
@@ -396,6 +425,23 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
           <Check className="h-6 w-6" /> Confirmar {totalValue > 0 && `— R$ ${totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
         </Button>
       </div>
+
+      <ClientDetailDrawer 
+        clientId={selectedClient?.id || null} 
+        open={missingInfoOpen} 
+        onOpenChange={setMissingInfoOpen}
+        onUpdate={() => {
+          supabase.from("clients").select("id, name, phone, email, city, birth_date").eq("id", selectedClient?.id).single()
+            .then(({ data }) => {
+              if (data) {
+                setSelectedClient(data);
+                const updatedClients = clients.map(c => c.id === data.id ? data : c);
+                setClients(updatedClients);
+              }
+              setMissingInfoOpen(false);
+            });
+        }} 
+      />
     </div>
   );
 }

@@ -1533,7 +1533,7 @@ export default function Chat() {
   const renderContactPanel = () => {
     if (!activeChat) return null;
     return (
-      <div className="w-[220px] border-l border-border bg-card flex flex-col hidden lg:flex shrink-0">
+      <div className="w-[220px] border-l border-border bg-card flex-col shrink-0 hidden lg:flex">
         <div className="p-4 border-b border-border text-center">
           <div
             className="w-14 h-14 rounded-full mx-auto mb-2 flex items-center justify-center text-white font-bold text-lg overflow-hidden"
@@ -1586,37 +1586,51 @@ export default function Chat() {
     );
   };
 
-  // ─── Main layout ─────────────────────────────────────────────────────────────
-  // Layout usa CSS puro (sem depender do hook isMobile em JS) para evitar
-  // flickering quando componente re-renderiza ao trocar de conversa.
-  // Mobile: sidebar ocupa tela toda quando nenhuma conversa está aberta,
-  //         mensagens ocupam tela toda quando conversa está aberta.
-  // Desktop (≥768px): sidebar + mensagens sempre visíveis lado a lado.
+  // ─── Main layout — CSS Grid ───────────────────────────────────────────────
+  // Grid garante que a sidebar SEMPRE tem exatamente 300px no desktop.
+  // No mobile a lógica usa data-atributos para esconder/mostrar via CSS.
+  const showSidebar  = !isMobile || !activeChatId;
+  const showMessages = !isMobile || !!activeChatId;
+
   return (
-    <div className="flex h-[calc(100vh-60px)] overflow-hidden animate-fade-in relative">
+    <div
+      className="h-[calc(100vh-60px)] overflow-hidden animate-fade-in"
+      style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "300px 1fr",
+        gridTemplateRows: "1fr",
+      }}
+    >
       {/* Lightbox */}
       {lightboxSrc && (
         <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
       )}
 
-      {/* Sidebar — sempre visível em desktop; no mobile oculta quando chat aberto */}
-      <div className={`
-        border-r border-border flex flex-col shrink-0
-        ${activeChatId
-          ? "hidden sm:flex sm:w-[300px]"   // mobile: esconde quando chat aberto
-          : "flex w-full sm:w-[300px]"      // mobile: mostra quando nenhum chat
-        }
-      `}>
+      {/* SIDEBAR — coluna fixa 300px no desktop, nunca encolhe */}
+      <div
+        className="border-r border-border flex flex-col overflow-hidden bg-background"
+        style={{
+          display: showSidebar ? "flex" : "none",
+          gridColumn: 1,
+          gridRow: 1,
+          minWidth: 0,
+        }}
+      >
         {renderSidebar()}
       </div>
 
-      {/* Mensagens — sempre visível em desktop; no mobile oculta quando sem chat */}
-      <div className={`
-        flex-1 flex min-w-0 relative
-        ${activeChatId ? "flex" : "hidden sm:flex"}
-      `}>
-        {renderMessages()}
-        <div className="hidden lg:block">
+      {/* ÁREA DE MENSAGENS — coluna flex-1 no desktop */}
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{
+          display: showMessages ? "flex" : "none",
+          gridColumn: isMobile ? 1 : 2,
+          gridRow: 1,
+          minWidth: 0,
+        }}
+      >
+        <div className="flex flex-1 min-h-0 overflow-hidden relative">
+          {renderMessages()}
           {renderContactPanel()}
         </div>
       </div>
