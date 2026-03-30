@@ -9,3 +9,4 @@ python-dotenv==1.0.1
 pydantic==2.9.0
 pydantic-settings==2.5.0
 tenacity==8.5.0
+pytz==2024.1
