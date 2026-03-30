@@ -77,7 +77,7 @@ BEGIN
     'entrada',
     'venda',
     'Venda #' || NEW.id,
-    NEW.total,
+    NEW.value,
     CURRENT_DATE,
     CURRENT_DATE,
     NEW.payment_method,

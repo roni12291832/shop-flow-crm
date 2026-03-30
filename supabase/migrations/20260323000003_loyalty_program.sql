@@ -82,7 +82,7 @@ BEGIN
   END IF;
 
   -- 3. Calcular Pontos (R$1 = X pontos)
-  v_pts_ganhos := FLOOR(NEW.total * v_config.reais_por_ponto * v_mult);
+  v_pts_ganhos := FLOOR(NEW.value * v_config.reais_por_ponto * v_mult);
 
   -- 4. Criar ou Atualizar Carteira
   INSERT INTO public.cliente_pontos (cliente_id, pontos_total, ultima_compra, nivel_atual)
