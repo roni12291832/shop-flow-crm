@@ -190,7 +190,7 @@ ${clients.slice(0, 5).map(c => `- ${c.name} (${c.origin || "sem origem"})${c.las
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-full shadow-lg transition-all duration-300 flex items-center justify-center group",
+          "fixed bottom-[6.5rem] md:bottom-6 right-6 z-[100] w-14 h-14 rounded-full shadow-lg transition-all duration-300 flex items-center justify-center group",
           open
             ? "bg-card border border-border text-muted-foreground hover:text-foreground"
             : "gradient-primary text-white hover:scale-110 shadow-glow"
