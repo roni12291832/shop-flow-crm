@@ -123,7 +123,12 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       notes: notes || null,
     }).select("id").single();
 
-    if (error) { toast.error("Erro ao registrar"); setSaving(false); return; }
+    if (error) { 
+      toast.error(`Erro ao registrar: ${error.message}`); 
+      console.error("Sale insert error:", error);
+      setSaving(false); 
+      return; 
+    }
 
     // Create inventory movements for cart items
     if (useProducts && cart.length > 0 && sale) {
@@ -141,10 +146,29 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       const { error: mvError } = await supabase.from("inventory_movements").insert(movements);
       if (mvError) {
         console.error("Erro ao baixar estoque:", mvError);
-        // Don't fail the sale entirely, just warn
         toast.warning("Venda registrada mas houve erro ao baixar estoque");
       }
     }
+
+    // ─── Crédito de Pontos de Fidelidade ─────────────────────────────
+    try {
+      // O trigger SQL já cuida de creditar os pontos automaticamente via:
+      //   trg_process_loyalty_on_sale → process_loyalty_on_sale()
+      // O código abaixo é um fallback extra para exibir feedback ao vendedor.
+      const { data: walletAfter } = await (supabase as any)
+        .from("cliente_pontos")
+        .select("pontos_total, nivel_atual")
+        .eq("cliente_id", selectedClient.id)
+        .maybeSingle();
+
+      if (walletAfter?.pontos_total > 0) {
+        const bonus = Math.floor(totalValue); // ~1 pt por R$1
+        toast.info(`+${bonus} ponto(s) de fidelidade para ${selectedClient.name}! Total: ${walletAfter.pontos_total} pts (${walletAfter.nivel_atual})`, { duration: 4000 });
+      }
+    } catch {
+      // silencioso — o trigger SQL é a fonte da verdade
+    }
+    // ─────────────────────────────────────────────────────────────────
 
     setSaving(false);
     setSuccess(true);
@@ -181,34 +205,37 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   }
 
   return (
-    <div className="px-5 pt-8 pb-4 space-y-5 max-w-lg mx-auto">
-      <h1 className="text-xl font-bold text-foreground">Nova Venda</h1>
+    <div className="px-4 pt-6 pb-24 space-y-6 max-w-lg mx-auto">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-black bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent tracking-tight">Nova Venda</h1>
+      </div>
 
       {/* Mode toggle */}
-      <div className="flex gap-2">
+      <div className="flex p-1.5 bg-secondary/40 rounded-2xl border border-white/5 backdrop-blur-md">
         <button onClick={() => setUseProducts(false)}
-          className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all",
-            !useProducts ? "bg-primary/20 text-primary border-primary/40" : "bg-card text-muted-foreground border-border"
+          className={cn("flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300",
+            !useProducts ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 scale-[1.02]" : "text-muted-foreground hover:text-foreground"
           )}>💰 Valor Manual</button>
         <button onClick={() => setUseProducts(true)}
-          className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all flex items-center justify-center gap-1.5",
-            useProducts ? "bg-primary/20 text-primary border-primary/40" : "bg-card text-muted-foreground border-border"
+          className={cn("flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-2",
+            useProducts ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 scale-[1.02]" : "text-muted-foreground hover:text-foreground"
           )}><Package className="h-4 w-4" /> Produtos</button>
       </div>
 
       {/* Value - manual mode */}
       {!useProducts && (
-        <div className="bg-card border border-border rounded-2xl p-6 text-center">
-          <p className="text-xs text-muted-foreground font-semibold mb-2 uppercase tracking-wide">Valor da Venda</p>
-          <div className="flex items-center justify-center gap-1">
-            <span className="text-2xl text-muted-foreground font-bold">R$</span>
+        <div className="relative group overflow-hidden bg-card/40 backdrop-blur-xl border border-white/10 rounded-[28px] p-8 text-center transition-all hover:border-primary/30">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          <p className="text-xs text-muted-foreground font-semibold mb-3 uppercase tracking-widest">Valor da Venda</p>
+          <div className="flex items-center justify-center gap-2 relative z-10">
+            <span className="text-3xl text-primary/70 font-bold">R$</span>
             <Input
               type="text"
               inputMode="decimal"
               placeholder="0,00"
               value={manualValue}
               onChange={e => setManualValue(e.target.value)}
-              className="text-4xl font-bold h-16 text-center border-none bg-transparent shadow-none focus-visible:ring-0 max-w-[200px]"
+              className="text-6xl font-black h-20 text-center border-none bg-transparent shadow-none focus-visible:ring-0 max-w-[240px] tracking-tight p-0 text-foreground"
             />
           </div>
         </div>
@@ -278,12 +305,14 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       )}
 
       {/* Client */}
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-foreground">Cliente</label>
+      <div className="space-y-3">
+        <label className="text-sm font-bold text-foreground/80 uppercase tracking-wide ml-1">Cliente</label>
         {selectedClient ? (
-          <div className="flex items-center justify-between bg-secondary rounded-xl px-4 py-3">
-            <span className="text-foreground font-medium text-sm">{selectedClient.name}</span>
-            <button className="text-muted-foreground text-xs hover:text-destructive" onClick={() => setSelectedClient(null)}>✕</button>
+          <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-2xl px-5 py-4">
+            <span className="text-primary font-bold text-base">{selectedClient.name}</span>
+            <button className="text-primary/60 hover:text-destructive transition-colors p-2 bg-background/50 rounded-full" onClick={() => setSelectedClient(null)}>
+              <X className="h-4 w-4" />
+            </button>
           </div>
         ) : (
           <div className="flex gap-2 relative">
@@ -335,18 +364,18 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       </div>
 
       {/* Payment method */}
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-foreground">Pagamento</label>
-        <div className="grid grid-cols-3 gap-2">
+      <div className="space-y-3">
+        <label className="text-sm font-bold text-foreground/80 uppercase tracking-wide ml-1">Pagamento</label>
+        <div className="grid grid-cols-3 gap-3">
           {PAYMENT_METHODS.map(pm => (
             <button key={pm.value} onClick={() => setPaymentMethod(pm.value)}
               className={cn(
-                "flex flex-col items-center gap-1 rounded-xl py-3 text-xs font-semibold border transition-all",
+                "flex flex-col items-center justify-center gap-2 rounded-2xl py-4 text-xs font-bold transition-all duration-200",
                 paymentMethod === pm.value
-                  ? "bg-primary/20 border-primary/40 text-primary"
-                  : "bg-card border-border text-muted-foreground hover:bg-secondary"
+                  ? "bg-primary border-2 border-primary shadow-lg shadow-primary/25 text-primary-foreground scale-[1.02]"
+                  : "bg-card/50 border-2 border-white/5 text-muted-foreground hover:bg-secondary hover:border-white/10"
               )}>
-              <span className="text-xl">{pm.icon}</span>
+              <span className="text-2xl mb-0.5">{pm.icon}</span>
               {pm.label}
             </button>
           ))}
@@ -354,15 +383,19 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       </div>
 
       {/* Notes */}
-      <div className="space-y-2">
-        <label className="text-sm font-semibold text-foreground">Observação</label>
-        <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Opcional..." />
+      <div className="space-y-3">
+        <label className="text-sm font-bold text-foreground/80 uppercase tracking-wide ml-1">Observação</label>
+        <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} 
+          className="bg-card/50 border-white/10 rounded-2xl resize-none focus-visible:ring-primary/50" 
+          placeholder="Detalhes opcionais sobre a venda..." />
       </div>
 
-      <Button onClick={handleSubmit} disabled={saving || !selectedClient || totalValue <= 0}
-        className="w-full h-14 text-base font-bold gap-2 rounded-xl">
-        ✓ Confirmar Venda {totalValue > 0 && `— R$ ${totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
-      </Button>
+      <div className="pt-4">
+        <Button onClick={handleSubmit} disabled={saving || !selectedClient || totalValue <= 0}
+          className="w-full h-16 text-lg font-black tracking-wide gap-3 rounded-2xl bg-gradient-to-r from-primary to-accent hover:opacity-90 shadow-[0_8px_30px_rgba(var(--primary-rgb),0.3)] transition-all active:scale-[0.98] border-0">
+          <Check className="h-6 w-6" /> Confirmar {totalValue > 0 && `— R$ ${totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
+        </Button>
+      </div>
     </div>
   );
 }
