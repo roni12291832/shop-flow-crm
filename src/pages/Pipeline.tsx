@@ -10,7 +10,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus } from "lucide-react";
+import { Plus, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { LossReasonDialog } from "@/components/crm/LossReasonDialog";
 
@@ -240,9 +240,15 @@ export default function Pipeline() {
                       <span className="text-[11px] font-semibold" style={{ color: stage.color }}>R${Number(opp.estimated_value).toLocaleString("pt-BR")}</span>
                     </div>
                     <div className="flex flex-wrap gap-1 mb-2">
-                       <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border/50 uppercase tracking-wide">
-                          {opp.origin === "whatsapp" ? "WPP" : opp.origin === "loja_fisica" ? "LOJA" : opp.origin?.substring(0, 4) || "OUTR"}
-                       </span>
+                       {opp.origin === "whatsapp" ? (
+                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#25D366]/15 text-[#25D366] border border-[#25D366]/30 flex items-center gap-1 shadow-sm">
+                           <MessageCircle className="h-3 w-3" /> WhatsApp
+                         </span>
+                       ) : (
+                         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 uppercase tracking-wide">
+                            {opp.origin === "loja_fisica" ? "LOJA" : opp.origin?.substring(0, 8) || "OUTR"}
+                         </span>
+                       )}
                     </div>
                     <div className="flex gap-1 flex-wrap mt-2" onClick={e => e.stopPropagation()}>
                       {STAGES.filter(s => s.value !== opp.stage).slice(0, 3).map(s => (
