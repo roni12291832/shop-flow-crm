@@ -3,12 +3,15 @@
 -- Mensagem de validade de 30 dias
 -- ===========================================================
 
--- 1. Alterar colunas para numeric para suportar decimais
+-- 1. Remover dependências temporariamente (Views)
+DROP VIEW IF EXISTS public.fidelidade_stats;
+
+-- 2. Alterar colunas para numeric para suportar decimais
 ALTER TABLE public.cliente_pontos ALTER COLUMN pontos_total TYPE numeric;
 ALTER TABLE public.pontos_historico ALTER COLUMN pontos TYPE numeric;
 ALTER TABLE public.loyalty_transactions ALTER COLUMN pontos TYPE numeric;
 
--- 2. Atualizar Configuração Default
+-- 3. Atualizar Configuração Default
 UPDATE public.fidelidade_config 
 SET 
   reais_por_ponto = 0.1,
@@ -21,7 +24,7 @@ SET
   ]'::jsonb
 WHERE id = (SELECT id FROM public.fidelidade_config LIMIT 1);
 
--- 3. Tabela de rastreamento de notificações enviadas
+-- 4. Tabela de rastreamento de notificações enviadas
 CREATE TABLE IF NOT EXISTS public.loyalty_notifications (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   customer_id uuid REFERENCES public.clients(id) ON DELETE CASCADE,
@@ -30,7 +33,18 @@ CREATE TABLE IF NOT EXISTS public.loyalty_notifications (
   sent_at timestamptz DEFAULT now()
 );
 
--- 4. Função do trigger atualizada com nova proporção e níveis
+-- 5. Recriar View de Estatísticas
+CREATE OR REPLACE VIEW public.fidelidade_stats AS
+SELECT
+  COUNT(DISTINCT cp.cliente_id) AS total_clientes,
+  COUNT(DISTINCT CASE WHEN cp.nivel_atual = 'Bronze' THEN cp.cliente_id END) AS clientes_bronze,
+  COUNT(DISTINCT CASE WHEN cp.nivel_atual = 'Prata'  THEN cp.cliente_id END) AS clientes_prata,
+  COUNT(DISTINCT CASE WHEN cp.nivel_atual = 'Ouro'   THEN cp.cliente_id END) AS clientes_ouro,
+  (SELECT COALESCE(SUM(pontos_total), 0) FROM public.cliente_pontos) AS total_pontos_ativos,
+  (SELECT COALESCE(SUM(pontos), 0) FROM public.pontos_historico WHERE tipo = 'resgate') AS total_pontos_resgatados
+FROM public.cliente_pontos cp;
+
+-- 6. Função do trigger atualizada com nova proporção e níveis
 CREATE OR REPLACE FUNCTION public.process_loyalty_on_sale()
 RETURNS TRIGGER AS $$
 DECLARE
