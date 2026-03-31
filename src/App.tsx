@@ -126,25 +126,22 @@ const AppRoutes = () => (
   </Routes>
 );
 
-const App = () => {
-  console.log("!!! APP COMPONENT IS RENDERING !!!");
-  return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <AuthProvider>
-              <AppRoutes />
-              <AuthenticatedAiAssistant />
-            </AuthProvider>
-          </BrowserRouter>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
-  );
-};
+const App = () => (
+  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <AppRoutes />
+            <AuthenticatedAiAssistant />
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
+);
 
 export default App;
 
