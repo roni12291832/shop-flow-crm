@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   BarChart3, Users, Kanban, MessageSquare, CheckSquare,
   Trophy, FileText, Settings, LogOut, Bell, Home, Menu, Target, Zap, Star, Smartphone, Shield, Wifi, Package, Megaphone, Layers, RefreshCw, DollarSign,
+  ShoppingBag
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
