@@ -107,7 +107,7 @@ export default function Loyalty() {
           { label: "Clientes Bronze", value: stats.clientesBronze, icon: Medal, color: "text-orange-500", bg: "bg-orange-50" },
           { label: "Clientes Prata",  value: stats.clientesPrata,  icon: Award,  color: "text-slate-500", bg: "bg-slate-50" },
           { label: "Clientes Ouro",   value: stats.clientesOuro,   icon: Crown,  color: "text-amber-500", bg: "bg-amber-50" },
-          { label: "Pontos Ativos",   value: stats.totalPontosAtivos.toLocaleString("pt-BR"), icon: Zap, color: "text-primary", bg: "bg-primary/5" },
+          { label: "Pontos Ativos",   value: stats.totalPontosAtivos.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: Zap, color: "text-primary", bg: "bg-primary/5" },
         ].map(s => (
           <div key={s.label} className="bg-card border rounded-2xl p-4 flex items-center gap-3">
             <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", s.bg)}>
@@ -199,7 +199,7 @@ export default function Loyalty() {
                         <Badge variant="outline" className="text-[10px] h-4 font-black">{w.nivel_atual}</Badge>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-lg font-black text-primary">{w.pontos_total} PTS</p>
+                        <p className="text-lg font-black text-primary">{w.pontos_total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} PTS</p>
                         <p className="text-[10px] text-muted-foreground uppercase font-bold">Saldo</p>
                       </div>
                     </div>
@@ -232,11 +232,11 @@ export default function Loyalty() {
 
               <div className="mt-4 flex gap-3">
                 <div className="flex-1 bg-white/10 p-3 rounded-2xl border border-white/10 text-center backdrop-blur-sm">
-                  <p className="text-xl font-black">{stats.totalPontosAtivos.toLocaleString("pt-BR")}</p>
+                  <p className="text-xl font-black">{stats.totalPontosAtivos.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</p>
                   <p className="text-[10px] uppercase font-bold opacity-80">Pts Ativos</p>
                 </div>
                 <div className="flex-1 bg-white/10 p-3 rounded-2xl border border-white/10 text-center backdrop-blur-sm">
-                  <p className="text-xl font-black">{stats.totalPontosResgatados.toLocaleString("pt-BR")}</p>
+                  <p className="text-xl font-black">{stats.totalPontosResgatados.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</p>
                   <p className="text-[10px] uppercase font-bold opacity-80">Pts Resgatados</p>
                 </div>
               </div>
@@ -250,9 +250,9 @@ export default function Loyalty() {
             </h3>
             <div className="space-y-4">
               {[
-                { label: "Ouro",   count: stats.clientesOuro,  color: "bg-amber-400", desc: "1.500+ pts" },
-                { label: "Prata",  count: stats.clientesPrata,  color: "bg-slate-400", desc: "500–1.499 pts" },
-                { label: "Bronze", count: stats.clientesBronze, color: "bg-orange-300", desc: "0–499 pts" },
+                { label: "Ouro",   count: stats.clientesOuro,  color: "bg-amber-400", desc: "150+ pts" },
+                { label: "Prata",  count: stats.clientesPrata,  color: "bg-slate-400", desc: "50–149 pts" },
+                { label: "Bronze", count: stats.clientesBronze, color: "bg-orange-300", desc: "0–49 pts" },
               ].map(tier => (
                 <div key={tier.label}>
                   <div className="flex justify-between text-xs mb-1">
@@ -302,7 +302,7 @@ function WalletCard({ wallet }: { wallet: any }) {
         <div>
           <p className="text-[10px] font-black uppercase text-muted-foreground tracking-widest mb-1">Saldo de Pontos</p>
           <p className="text-2xl font-black text-foreground">
-            {wallet.pontos_total} <span className="text-sm font-bold opacity-50">PTS</span>
+            {wallet.pontos_total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} <span className="text-sm font-bold opacity-50">PTS</span>
           </p>
         </div>
         <div className="text-right">
@@ -335,8 +335,9 @@ function ConfigLoyalty({ config, onSave }: any) {
           </div>
           <div className="bg-muted/50 p-6 rounded-2xl border border-dashed text-center">
             <p className="text-sm font-medium text-muted-foreground mb-2">A cada <span className="font-black text-foreground">R$ 1,00</span> gasto, o cliente ganha:</p>
-            <span className="text-5xl font-black text-primary">1 PONTO</span>
+            <span className="text-5xl font-black text-primary">0.10 PONTOS</span>
             <p className="text-xs text-muted-foreground mt-3">Creditado automaticamente via trigger SQL</p>
+            <p className="text-[10px] text-primary font-bold mt-1 uppercase tracking-widest">1 PONTO = R$ 1,00</p>
           </div>
           <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-xl dark:bg-emerald-950/20 dark:border-emerald-900">
             <Gift className="h-4 w-4 text-emerald-500" />
@@ -352,17 +353,14 @@ function ConfigLoyalty({ config, onSave }: any) {
           <div className="space-y-8">
             <div className="space-y-4">
               <div className="flex justify-between">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Pontos para 1 Desconto</label>
+                <label className="text-xs font-bold uppercase text-muted-foreground">Pontos para Resgate</label>
                 <span className="font-black text-primary">{ptsDesconto} Pts</span>
               </div>
-              <Slider defaultValue={[ptsDesconto]} max={500} step={50} onValueChange={(v) => setPtsDesconto(v[0])} />
-            </div>
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Valor do Desconto</label>
-                <span className="font-black text-primary">R$ {valDesconto}</span>
-              </div>
-              <Slider defaultValue={[valDesconto]} max={50} step={5} onValueChange={(v) => setValDesconto(v[0])} />
+              <Slider defaultValue={[ptsDesconto]} max={100} step={1} onValueChange={(v) => {
+                setPtsDesconto(v[0]);
+                setValDesconto(v[0]); // 1 pt = 1 real
+              }} />
+              <p className="text-[10px] text-muted-foreground">Valor do desconto: <span className="font-bold text-primary">R$ {valDesconto.toFixed(2)}</span></p>
             </div>
             <div className="space-y-4">
               <div className="flex justify-between">

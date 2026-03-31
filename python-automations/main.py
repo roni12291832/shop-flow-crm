@@ -21,7 +21,10 @@ from config import get_settings
 from webhooks import router as webhooks_router
 from campaigns import router as campaigns_router
 from whatsapp_router import router as whatsapp_router
-from crons import job_daily_report, job_sync_offline_messages, job_notify_stale_leads, job_send_post_sale_nps
+from crons import (
+    job_daily_report, job_sync_offline_messages, job_notify_stale_leads, 
+    job_send_post_sale_nps, job_loyalty_2d_notification, job_loyalty_expiration_warning
+)
 from finance_notifications import job_finance_notifications
 from jarvis_agent import jarvis
 _IMPORT_ERROR = None
@@ -142,6 +145,24 @@ async def lifespan(app: FastAPI):
         IntervalTrigger(minutes=1),
         id="nps_after_sale",
         name="NPS Pós-Venda Automático",
+        replace_existing=True,
+    )
+
+    # Notificações de Fidelidade (2 dias pós-venda)
+    scheduler.add_job(
+        job_loyalty_2d_notification,
+        IntervalTrigger(minutes=60), # Roda a cada hora para verificar a janela
+        id="loyalty_2d_notice",
+        name="Aviso de Pontos (2 dias)",
+        replace_existing=True,
+    )
+
+    # Aviso de expiração de pontos (15 dias sem compra)
+    scheduler.add_job(
+        job_loyalty_expiration_warning,
+        CronTrigger(hour=9, minute=0, timezone="America/Sao_Paulo"),
+        id="loyalty_exp_warning",
+        name="Aviso Expiração Fidelidade",
         replace_existing=True,
     )
 

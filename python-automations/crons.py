@@ -381,3 +381,147 @@ async def job_send_post_sale_nps():
         if ativos > 0:
             logger.info("Enviadas %d mensagens de NPS pós-venda (3 min)", ativos)
 
+
+async def job_loyalty_2d_notification():
+    """
+    Notifica o cliente sobre os pontos ganhos 2 dias após a compra.
+    """
+    async with registrar_automacao("fidelidade_aviso_2d"):
+        db = get_supabase()
+        
+        # Janela de 2 dias (entre 48h e 72h atrás)
+        now = datetime.now(timezone.utc)
+        start_48h = (now - timedelta(hours=72)).isoformat()
+        end_48h = (now - timedelta(hours=48)).isoformat()
+
+        # Busca vendas confirmadas nesse período
+        # NOTA: Usamos sales_entries pois é o gatilho da compra
+        sales_res = (
+            db.table("sales_entries")
+            .select("id, customer_id, value")
+            .eq("status", "confirmado")
+            .gte("created_at", start_48h)
+            .lte("created_at", end_48h)
+            .execute()
+        )
+        sales = sales_res.data or []
+        if not sales:
+            return
+
+        # Busca configuração de fidelidade
+        config_res = db.table("fidelidade_config").select("*").limit(1).execute()
+        if not config_res.data:
+            return
+        config = config_res.data[0]
+        msg_template = config.get("msg_template", "Olá {nome}! Você ganhou {pontos} pontos! Saldo: {total} pts.")
+
+        instance_res = db.table("whatsapp_instances").select("*").eq("status", "connected").limit(1).execute()
+        if not instance_res.data:
+            return
+        inst = instance_res.data[0]
+
+        count = 0
+        for sale in sales:
+            # Verifica se já notificamos sobre esta venda (2d)
+            dup_check = db.table("loyalty_notifications").select("id").eq("reference_id", sale["id"]).eq("notification_type", "notice_2d").execute()
+            if dup_check.data:
+                continue
+
+            # Dados do cliente e saldo
+            cl_res = db.table("clients").select("id, name, phone").eq("id", sale["customer_id"]).execute()
+            if not cl_res.data or not cl_res.data[0].get("phone"):
+                continue
+            client = cl_res.data[0]
+            
+            ponto_res = db.table("cliente_pontos").select("pontos_total").eq("cliente_id", client["id"]).execute()
+            if not ponto_res.data:
+                continue
+            total_pontos = float(ponto_res.data[0]["pontos_total"])
+
+            # Pontos ganhos nesta venda específica
+            item_res = db.table("pontos_historico").select("pontos").eq("venda_id", sale["id"]).eq("tipo", "ganho").execute()
+            pontos_ganhos = float(item_res.data[0]["pontos"]) if item_res.data else (float(sale["value"]) * 0.1)
+
+            # Personaliza mensagem
+            msg = msg_template.replace("{nome}", client["name"].split()[0]) \
+                              .replace("{pontos}", f"{pontos_ganhos:.2f}") \
+                              .replace("{total}", f"{total_pontos:.2f}")
+
+            if DRY_RUN:
+                logger.info("[DRY_RUN] Enviaria aviso 2d para %s: %s", client["phone"], msg)
+            else:
+                try:
+                    await uazapi.send_text(inst["api_url"], inst["api_token"], inst["instance_name"], client["phone"], msg)
+                    db.table("loyalty_notifications").insert({
+                        "customer_id": client["id"],
+                        "reference_id": sale["id"],
+                        "notification_type": "notice_2d"
+                    }).execute()
+                    count += 1
+                except Exception as e:
+                    logger.error("Erro no aviso 2d para %s: %s", client["phone"], e)
+
+        if count > 0:
+            logger.info("Enviados %d avisos de pontos (2 dias pós-venda)", count)
+
+
+async def job_loyalty_expiration_warning():
+    """
+    Avisa o cliente que seus pontos expiram em 15 dias (se não comprar).
+    Roda quando ultima_compra foi há 15 dias.
+    """
+    async with registrar_automacao("fidelidade_aviso_expiracao"):
+        db = get_supabase()
+        
+        # Janela de 15 dias atrás
+        cutoff_start = (datetime.now(timezone.utc) - timedelta(days=16)).isoformat()
+        cutoff_end = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+
+        wallets_res = (
+            db.table("cliente_pontos")
+            .select("*, cliente:clients(id, name, phone)")
+            .gt("pontos_total", 0)
+            .gte("ultima_compra", cutoff_start)
+            .lte("ultima_compra", cutoff_end)
+            .execute()
+        )
+        wallets = wallets_res.data or []
+        if not wallets:
+            return
+
+        instance_res = db.table("whatsapp_instances").select("*").eq("status", "connected").limit(1).execute()
+        if not instance_res.data:
+            return
+        inst = instance_res.data[0]
+
+        count = 0
+        for w in wallets:
+            client = w["cliente"]
+            if not client or not client.get("phone"):
+                continue
+
+            # Verifica se já notificamos (evita resend se rodar 2x)
+            dup_check = db.table("loyalty_notifications").select("id").eq("customer_id", client["id"]).eq("notification_type", "warning_15d").gte("sent_at", (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()).execute()
+            if dup_check.data:
+                continue
+
+            pts = float(w["pontos_total"])
+            first_name = client["name"].split()[0]
+            msg = f"Oi {first_name}! Notamos que você tem {pts:.2f} pontos acumulados no nosso Programa de Fidelidade. ✨\n\nPassando para avisar que eles expiram em 15 dias se não forem utilizados. Que tal aproveitar para garantir aquele item que você estava namorando? 🛍️"
+
+            if DRY_RUN:
+                logger.info("[DRY_RUN] Enviaria aviso expiração para %s: %s", client["phone"], msg)
+            else:
+                try:
+                    await uazapi.send_text(inst["api_url"], inst["api_token"], inst["instance_name"], client["phone"], msg)
+                    db.table("loyalty_notifications").insert({
+                        "customer_id": client["id"],
+                        "notification_type": "warning_15d"
+                    }).execute()
+                    count += 1
+                except Exception as e:
+                    logger.error("Erro no aviso expiração para %s: %s", client["phone"], e)
+
+        if count > 0:
+            logger.info("Enviados %d avisos de expiração de pontos (15 dias s/ compra)", count)
+
