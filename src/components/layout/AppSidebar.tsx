@@ -97,12 +97,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           {tenantInfo?.logo_url ? (
             <img src={tenantInfo.logo_url} alt={tenantInfo.company_name} className="w-9 h-9 rounded-[10px] object-contain" />
           ) : (
-            <div className="w-9 h-9 rounded-[10px] gradient-primary flex items-center justify-center shadow-glow">
-              <BarChart3 className="h-[18px] w-[18px] text-white" />
+            <div className="w-9 h-9 rounded-[10px] gradient-primary flex items-center justify-center shadow-glow overflow-hidden">
+               <img src="/logo.png" alt="Sistema ERP AI" className="w-full h-full object-cover" />
             </div>
           )}
           <div>
-            <div className="text-[15px] font-extrabold text-foreground">{tenantInfo?.company_name || "StoreCRM"}</div>
+            <div className="text-[15px] font-extrabold text-foreground">{tenantInfo?.company_name || "Sistema ERP AI"}</div>
             <div className="text-[11px] text-muted-foreground">{userRole}</div>
           </div>
         </div>
