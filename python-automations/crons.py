@@ -294,11 +294,11 @@ async def job_send_post_sale_nps():
     Envia pedido de avaliação via WhatsApp 3 minutos após
     o registro de uma nova venda (status='confirmado').
     """
-    async with registrar_automacao("nps_pos_venda_3min"):
+    async with registrar_automacao("nps_pos_venda_5min"):
         db = get_supabase()
 
-        # Janela: vendas confirmadas nos últimos 60 minutos, e com >= 3 minutos de idade
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=3)
+        # Janela: vendas confirmadas nos últimos 60 minutos, e com >= 5 minutos de idade
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
         start_window = datetime.now(timezone.utc) - timedelta(minutes=60)
         
         sales_res = (

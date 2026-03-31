@@ -38,7 +38,10 @@ export default function Clients() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" });
+  const [form, setForm] = useState({ 
+    name: "", phone: "", email: "", city: "", origin: "outro", notes: "",
+    cpf_cnpj: "", zip_code: "", address: "", number: "", complement: "", neighborhood: "", state: ""
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [importData, setImportData] = useState<ImportRow[]>([]);
@@ -93,6 +96,13 @@ export default function Clients() {
       city: form.city || null, 
       origin: form.origin as any, 
       notes: form.notes || null,
+      cpf_cnpj: form.cpf_cnpj || null,
+      zip_code: form.zip_code || null,
+      address: form.address || null,
+      number: form.number || null,
+      complement: form.complement || null,
+      neighborhood: form.neighborhood || null,
+      state: form.state || null,
     }).select();
 
     if (error) {
@@ -102,7 +112,10 @@ export default function Clients() {
       console.log("Client created successfully:", data);
       toast.success("Cliente criado!"); 
       setDialogOpen(false); 
-      setForm({ name: "", phone: "", email: "", city: "", origin: "outro", notes: "" }); 
+      setForm({ 
+        name: "", phone: "", email: "", city: "", origin: "outro", notes: "",
+        cpf_cnpj: "", zip_code: "", address: "", number: "", complement: "", neighborhood: "", state: ""
+      }); 
       fetchClients(); 
     }
   };
@@ -288,12 +301,23 @@ export default function Clients() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Cidade</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
-                <div className="space-y-2"><Label>Origem</Label>
-                  <Select value={form.origin} onValueChange={(v) => setForm({ ...form, origin: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{ORIGINS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
+                <div className="space-y-2"><Label>Estado</Label><Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} maxLength={2} placeholder="UF" /></div>
+              </div>
+              <div className="space-y-2"><Label>CPF / CNPJ</Label><Input value={form.cpf_cnpj} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label>CEP</Label><Input value={form.zip_code} onChange={(e) => setForm({ ...form, zip_code: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Bairro</Label><Input value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /></div>
+              </div>
+              <div className="space-y-2"><Label>Logradouro</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label>Número</Label><Input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Complemento</Label><Input value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /></div>
+              </div>
+              <div className="space-y-2"><Label>Origem</Label>
+                <Select value={form.origin} onValueChange={(v) => setForm({ ...form, origin: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{ORIGINS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                </Select>
               </div>
               <Button type="submit" className="w-full">Cadastrar Cliente</Button>
             </form>

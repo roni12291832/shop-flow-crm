@@ -287,12 +287,13 @@ async def jarvis_ask(request: dict):
 
 @app.post("/jarvis/variations")
 async def jarvis_variations(request: dict):
-    """Gera 15 variações de uma mensagem para a régua."""
+    """Gera variações de uma mensagem para a régua."""
     base_message = request.get("message", "")
+    count = request.get("count", 15)
     if not base_message:
         return {"error": "Envie a mensagem base no campo 'message'"}
     
-    variations = await jarvis.generate_message_variations(base_message)
+    variations = await jarvis.generate_message_variations(base_message, count=count)
     return {"variations": variations}
 
 

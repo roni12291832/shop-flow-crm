@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const PYTHON_BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const MIN_VARIATIONS = 15;
+const DEFAULT_BIRTHDAY_VARIATIONS = 2;
+const DEFAULT_CAMPAIGN_VARIATIONS = 15;
 const MAX_PHOTOS = 4;
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
@@ -121,6 +122,11 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
     pendingMedia: [],
   });
 
+  const [desiredVariations, setDesiredVariations] = useState(DEFAULT_BIRTHDAY_VARIATIONS);
+
+  const getMinVariations = (event: string) => event === "birthday" ? DEFAULT_BIRTHDAY_VARIATIONS : DEFAULT_CAMPAIGN_VARIATIONS;
+  const minVariations = getMinVariations(form.trigger_event);
+
   // Base message para enviar ao Jarvis
   const [baseMessage, setBaseMessage] = useState(
     initialData?.message_template?.split("|||")[0]?.trim() || "",
@@ -144,6 +150,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
       });
       const base = initialData.message_template?.split("|||")[0]?.trim() || "";
       setBaseMessage(base);
+      setDesiredVariations(initialData.variations?.length || getMinVariations(initialData.trigger_event || "birthday"));
     } else {
       setForm({
         name: "",
@@ -158,6 +165,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
         pendingMedia: [],
       });
       setBaseMessage("");
+      setDesiredVariations(DEFAULT_BIRTHDAY_VARIATIONS);
     }
     setStep(1);
   }, [open]); // eslint-disable-line
@@ -246,7 +254,10 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
       const resp = await fetch(`${PYTHON_BACKEND_URL}/jarvis/variations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: baseMessage.trim(), count: MIN_VARIATIONS }),
+        body: JSON.stringify({ 
+          message: baseMessage.trim(), 
+          count: desiredVariations 
+        }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -291,7 +302,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
     }
     if (step === 2) {
       const validVars = form.variations.filter(v => v.trim().length > 0);
-      return validVars.length >= MIN_VARIATIONS;
+      return validVars.length >= minVariations;
     }
     return true;
   };
@@ -511,7 +522,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="text-foreground">Mensagem base</Label>
-                <span className="text-[10px] text-muted-foreground">O Jarvis vai criar {MIN_VARIATIONS} variações a partir desta</span>
+                <span className="text-[10px] text-muted-foreground">O Jarvis vai criar {minVariations} variações a partir desta</span>
               </div>
               <Textarea
                 placeholder={
@@ -544,7 +555,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
               {generatingVariations ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Gerando com Jarvis...</>
               ) : (
-                <><Sparkles className="h-4 w-4" /> Gerar {MIN_VARIATIONS} Variações com Jarvis</>
+                <><Sparkles className="h-4 w-4" /> Gerar {desiredVariations} Variações com Jarvis</>
               )}
             </Button>
 
@@ -571,7 +582,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
               <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
               <p className="text-muted-foreground">
                 <strong className="text-primary">Anti-bloqueio WhatsApp:</strong> cada cliente recebe
-                uma variação diferente selecionada aleatoriamente. Com {MIN_VARIATIONS}+ variações,
+                uma variação diferente selecionada aleatoriamente. Com {minVariations}+ variações,
                 o padrão de envio parece manual para o WhatsApp.
               </p>
             </div>
@@ -793,7 +804,7 @@ export function RuleWizard({ open, onClose, onSave, initialData }: RuleWizardPro
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="text-xs text-muted-foreground">Variações de mensagem</p>
-                  <Badge variant={validVariationsCount >= MIN_VARIATIONS ? "default" : "destructive"} className="text-[10px]">
+                  <Badge variant={validVariationsCount >= minVariations ? "default" : "destructive"} className="text-[10px]">
                     {validVariationsCount} variações
                   </Badge>
                 </div>
