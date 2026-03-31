@@ -352,8 +352,12 @@ function ExchangeRequestDialog({ isOpen, onClose, onSuccess }: any) {
     if (!searchQuery) return;
     setSearching(true);
     try {
-      // Find sale by id or customer phone/name
-      const { data, error } = await supabase
+      console.log("Searching for sale with query:", searchQuery);
+      
+      // 1. Try search by ID directly if it looks like a UUID
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchQuery);
+      
+      let query = supabase
         .from("sales_entries")
         .select(`
             *,
@@ -363,15 +367,42 @@ function ExchangeRequestDialog({ isOpen, onClose, onSuccess }: any) {
                 unit_price, 
                 sku_id:produto_skus(id, sku, cor, tamanho, produto:produtos(nome))
             )
-        `)
-        .or(`id.eq.${searchQuery},customer_id.in.(select id from clients where phone ilike '%${searchQuery}%' or name ilike '%${searchQuery}%')`)
-        .single();
+        `);
 
-      if (error) throw error;
-      setFoundSale(data);
-      setStep(2);
+      if (isUuid) {
+        const { data, error } = await query.eq("id", searchQuery).maybeSingle();
+        if (data) {
+          setFoundSale(data);
+          setStep(2);
+          return;
+        }
+      }
+
+      // 2. Search for clients matching the query
+      const { data: clients } = await supabase
+        .from("clients")
+        .select("id")
+        .or(`name.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%`);
+
+      if (clients && clients.length > 0) {
+        const clientIds = clients.map(c => c.id);
+        const { data: sales, error: salesError } = await query
+          .in("customer_id", clientIds)
+          .order("sold_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (sales) {
+          setFoundSale(sales);
+          setStep(2);
+          return;
+        }
+      }
+
+      toast.error("Nenhuma venda encontrada para este critério.");
     } catch (e) {
-      toast.error("Venda não encontrada ou erro na busca.");
+      console.error("Search error:", e);
+      toast.error("Erro ao buscar venda.");
     } finally {
       setSearching(false);
     }

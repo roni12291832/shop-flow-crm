@@ -22,6 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 const navItems = [
   { icon: Home, label: "Dashboard", path: "/" },
+  { icon: ShoppingBag, label: "Vendas", path: "/vendas" },
   { icon: Users, label: "Clientes", path: "/clients" },
   { icon: Kanban, label: "Fluxo CRM", path: "/pipeline" },
   { icon: MessageSquare, label: "WhatsApp", path: "/chat", badgeKey: "chat" },

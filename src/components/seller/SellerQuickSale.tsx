@@ -65,9 +65,26 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
   useEffect(() => {
     supabase.from("clients").select("id, name, phone, email, city, birth_date").order("name")
       .then(({ data }) => setClients(data || []));
-    supabase.from("products").select("id, name, sell_price, current_stock, unit")
-      .eq("active", true).order("name")
-      .then(({ data }) => setProducts((data as any[]) || []));
+    
+    // Fetch from the new grid system
+    supabase.from("produto_skus").select(`
+      id,
+      sku,
+      preco,
+      estoque_atual,
+      produto:produtos(nome)
+    `)
+    .eq("active", true)
+    .then(({ data }) => {
+      const formatted = (data || []).map((s: any) => ({
+        id: s.id,
+        name: `${s.produto.nome} (${s.sku})`,
+        sell_price: s.preco,
+        current_stock: s.estoque_atual,
+        unit: "un"
+      }));
+      setProducts(formatted);
+    });
   }, []);
 
   const filtered = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 6);
@@ -125,7 +142,7 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
 
     // Create sale entry
     const { data: sale, error } = await supabase.from("sales_entries").insert({
-            user_id: user.id,
+      user_id: user.id,
       customer_id: selectedClient.id,
       value: totalValue,
       payment_method: paymentMethod as any,
@@ -140,23 +157,34 @@ export function SellerQuickSale({ onSaleCreated }: Props) {
       return; 
     }
 
-    // Create inventory movements for cart items
+    // Create sale items and inventory movements
     if (useProducts && cart.length > 0 && sale) {
-      const movements = cart.map(item => ({
-                product_id: item.productId,
-        type: "saida" as const,
+      const saleItems = cart.map(item => ({
+        sale_id: sale.id,
+        sku_id: item.productId,
         quantity: item.quantity,
-        unit_cost: item.unitPrice,
-        reference_type: "venda",
-        reference_id: sale.id,
-        notes: `Venda para ${selectedClient.name}`,
-        user_id: user.id,
+        unit_price: item.unitPrice
       }));
 
-      const { error: mvError } = await supabase.from("inventory_movements").insert(movements);
-      if (mvError) {
-        console.error("Erro ao baixar estoque:", mvError);
-        toast.warning("Venda registrada mas houve erro ao baixar estoque");
+      const { error: itemsError } = await supabase.from("sales_entries_itens").insert(saleItems);
+      if (itemsError) {
+        console.error("Erro ao registrar itens da venda:", itemsError);
+        toast.warning("Venda registrada mas houve erro ao salvar itens detalhados");
+      }
+
+      // Update stock in produto_skus
+      for (const item of cart) {
+        const { error: stError } = await supabase.rpc('decrement_product_stock', {
+          row_id: item.productId,
+          qty: item.quantity
+        });
+        
+        if (stError) {
+           // Fallback if RPC doesn't exist yet
+           await supabase.from("produto_skus")
+             .update({ estoque_atual: item.stock - item.quantity })
+             .eq("id", item.productId);
+        }
       }
     }
 

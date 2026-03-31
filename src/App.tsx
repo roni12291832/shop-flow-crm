@@ -30,6 +30,7 @@ import WhatsAppConnect from "./pages/WhatsAppConnect";
 import FollowUp from "./pages/FollowUp";
 import Inventory from "./pages/Inventory";
 import Catalog from "./pages/Catalog";
+import Sales from "./pages/Sales";
 import Exchanges from "./pages/Exchanges";
 import AdsDashboard from "./pages/AdsDashboard";
 import NotFound from "./pages/NotFound";
@@ -105,6 +106,7 @@ const AppRoutes = () => (
     <Route path="/fidelidade" element={<AdminRoute><Loyalty /></AdminRoute>} />
     <Route path="/estoque" element={<AdminRoute><Inventory /></AdminRoute>} />
     <Route path="/catalogo" element={<AdminRoute><Catalog /></AdminRoute>} />
+    <Route path="/vendas" element={<AdminRoute><Sales /></AdminRoute>} />
     <Route path="/trocas" element={<AdminRoute><Exchanges /></AdminRoute>} />
     <Route path="/anuncios" element={<AdminRoute><AdsDashboard /></AdminRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
