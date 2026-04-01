@@ -598,7 +598,34 @@ Responda APENAS "SIM" se for um feedback positivo/elogio explícito sobre a comp
                         logger.warning("Falha ao analisar feedback de comprador: %s", e)
                         opportunity_action = f"existing_comprador_error_{e}"
 
-                elif existing_opp["stage"] not in ("perdido", "desqualificado"):
+                elif existing_opp["stage"] in ("perdido", "desqualificado"):
+                    # Contato voltou após ter sido perdido/desqualificado → reabre como lead_novo
+                    ins = db.table("opportunities").insert({
+                        "title": f"Lead WhatsApp - {push_name or phone}",
+                        "client_id": client_id,
+                        "stage": "lead_novo",
+                        "estimated_value": 0,
+                    }).execute()
+                    if ins.data:
+                        opportunity_action = "reactivated_lead_novo"
+                        logger.info(
+                            "Contato reativado: %s estava em '%s', nova oportunidade criada em lead_novo",
+                            phone, existing_opp["stage"],
+                        )
+                        try:
+                            await on_stage_change(
+                                client_id=str(client_id),
+                                opportunity_id=str(ins.data[0]["id"]),
+                                new_stage="lead_novo",
+                                old_stage=None,
+                            )
+                        except Exception as fe:
+                            logger.warning("Erro ao acionar follow-up de 'lead_novo' reativado (não crítico): %s", fe)
+                    else:
+                        opportunity_action = "reactivate_failed"
+                        logger.error("Falha ao reativar oportunidade para %s", phone)
+
+                else:
                     # Oportunidade em etapa ativa (lead_novo, contato_iniciado, interessado) → analisa mensagem
                     old_stage = existing_opp["stage"]
                     opportunity_action = f"existing_{old_stage}"

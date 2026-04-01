@@ -317,10 +317,10 @@ export default function FollowUp() {
       const data = await apiFetch("/jarvis/variations", "POST", {
         message: `Gere ${step.min_variations} variações desta mensagem de follow-up para leads na etapa "${STAGE_LABELS[step.stage]}" (step ${step.step_number}, ${delayLabel(step.delay_hours)}). Mantenha o mesmo objetivo mas com palavras, estrutura e tom diferentes. Mensagem base: "${base}"`,
       });
-      const variations: string[] = (data.variations || "")
-        .split(/\|\|\||\n/)
-        .map((v: string) => v.trim().replace(/^\d+\.\s*/, ""))
-        .filter((v: string) => v.length > 0);
+      const raw = data.variations;
+      const variations: string[] = Array.isArray(raw)
+        ? raw.map((v: string) => v.trim().replace(/^\d+\.\s*/, "")).filter((v: string) => v.length > 0)
+        : (raw || "").split(/\|\|\||\n/).map((v: string) => v.trim().replace(/^\d+\.\s*/, "")).filter((v: string) => v.length > 0);
 
       if (variations.length > 0) {
         setLocalMessages(prev => ({ ...prev, [step.id]: variations }));
