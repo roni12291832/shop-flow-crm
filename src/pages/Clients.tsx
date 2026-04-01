@@ -73,11 +73,11 @@ export default function Clients() {
     } else if (data) {
       // Mostra apenas:
       // 1. Compradores — tem ao menos uma oportunidade em "comprador"
-      // 2. Clientes diretos — não têm nenhuma oportunidade (foram cadastrados manualmente como cliente)
+      // 2. Clientes diretos — não têm nenhuma oportunidade E não vieram do WhatsApp (cadastro manual)
       const clientesReais = (data as Client[]).filter((c) => {
         const stages = clientStages[c.id];
-        if (!stages) return true;          // Sem pipeline → cliente direto → mostra
-        return stages.has("comprador");    // Tem comprador → mostra
+        if (!stages) return c.origin !== "whatsapp"; // Sem pipeline: só mostra se não for lead do WhatsApp
+        return stages.has("comprador");              // Tem comprador → mostra
       });
       setClients(clientesReais);
     }

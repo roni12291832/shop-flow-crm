@@ -241,7 +241,7 @@ REGRAS CRÍTICAS:
         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Vendas do dia (campos selecionados + limite)
-        sales_res = self.db.table("sales_entries").select("id, value, seller_id, created_at").gte("created_at", f"{today}T00:00:00").limit(500).execute()
+        sales_res = self.db.table("sales_entries").select("id, value, created_at").gte("created_at", f"{today}T00:00:00").limit(500).execute()
         sales = sales_res.data or []
         total_sales = sum(float(s.get("value") or 0) for s in sales)
 
