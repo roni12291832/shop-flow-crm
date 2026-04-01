@@ -132,11 +132,84 @@ async def debug_pipeline():
         .execute()
     )
 
+    # Mensagens recentes recebidas (via webhook = tem provider_message_id, via sync = não tem)
+    recent_msgs = (
+        db.table("messages")
+        .select("id, content, sender_type, provider_message_id, created_at, client_id")
+        .eq("sender_type", "cliente")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+
     return {
         "recent_opportunities_48h": opps.data or [],
         "watcher_moves_48h": watcher_logs.data or [],
         "recent_errors": errors.data or [],
+        "recent_client_messages_48h": [
+            {**m, "source": "webhook" if m.get("provider_message_id") else "sync_offline"}
+            for m in (recent_msgs.data or [])
+        ],
     }
+
+
+@router.post("/debug/test-lead")
+async def debug_test_lead(request: Request):
+    """
+    Simula a criação de um lead via webhook para testar se o banco está funcionando.
+    Body: { "phone": "5511999999999", "name": "Teste" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return {"error": "JSON inválido"}
+
+    phone = body.get("phone", "5500000000000")
+    name = body.get("name", "Teste Debug")
+
+    db = get_supabase()
+    result = {"steps": {}}
+
+    # 1. Testa criação/busca de cliente
+    try:
+        client_res = db.table("clients").select("id, name").eq("phone", phone).limit(1).execute()
+        if client_res.data:
+            client_id = client_res.data[0]["id"]
+            result["steps"]["client"] = f"encontrado: {client_id}"
+        else:
+            ins = db.table("clients").insert({"name": name, "phone": phone, "origin": "whatsapp"}).execute()
+            if ins.data:
+                client_id = ins.data[0]["id"]
+                result["steps"]["client"] = f"criado: {client_id}"
+            else:
+                result["steps"]["client"] = f"FALHOU: {ins}"
+                return result
+    except Exception as e:
+        result["steps"]["client"] = f"ERRO: {e}"
+        return result
+
+    # 2. Testa busca de oportunidade
+    try:
+        opp_res = db.table("opportunities").select("id, stage").eq("client_id", client_id).limit(1).execute()
+        if opp_res.data:
+            result["steps"]["opportunity"] = f"já existe: {opp_res.data[0]}"
+        else:
+            # 3. Testa criação de oportunidade
+            ins_opp = db.table("opportunities").insert({
+                "title": f"Lead WhatsApp - {name}",
+                "client_id": client_id,
+                "stage": "lead_novo",
+                "estimated_value": 0,
+            }).execute()
+            if ins_opp.data:
+                result["steps"]["opportunity"] = f"criada: {ins_opp.data[0]}"
+            else:
+                result["steps"]["opportunity"] = f"FALHOU (sem data): {ins_opp}"
+    except Exception as e:
+        result["steps"]["opportunity"] = f"ERRO: {e}"
+
+    return result
 
 
 @router.post("/setup")
