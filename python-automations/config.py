@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # URL do frontend — usada para restringir CORS
     frontend_url: str = ""   # Ex: https://meucrm.vercel.app
 
+    # URL do conector WhatsApp interno (Baileys)
+    wa_connector_url: str = "http://localhost:3001"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

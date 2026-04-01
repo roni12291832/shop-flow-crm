@@ -9,7 +9,7 @@ Para rodar:
 """
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -323,6 +323,39 @@ async def jarvis_report_now():
     """Força a geração e envio do relatório diário agora (manual)."""
     await job_daily_report()
     return {"status": "ok", "message": "Relatório enviado!"}
+
+
+@app.post("/wa/internal/set-status")
+async def wa_internal_set_status(request: Request):
+    """Chamado pelo conector Node.js interno para atualizar status no DB."""
+    from fastapi import Request as _Request
+    body = await request.json()
+    status = body.get("status", "disconnected")
+    try:
+        db_s = get_supabase()
+        inst = db_s.table("whatsapp_instances").select("id").limit(1).execute()
+        from config import get_settings as _gs
+        _s = _gs()
+        connector_url = "http://localhost:3001"
+        if inst.data:
+            db_s.table("whatsapp_instances").update({
+                "status": status,
+                "api_url": connector_url,
+                "api_token": "internal",
+                "instance_token": "internal",
+                "instance_name": "shopflow",
+            }).eq("id", inst.data[0]["id"]).execute()
+        else:
+            db_s.table("whatsapp_instances").insert({
+                "api_url": connector_url,
+                "api_token": "internal",
+                "instance_name": "shopflow",
+                "instance_token": "internal",
+                "status": status,
+            }).execute()
+    except Exception as e:
+        logger.warning("Erro ao atualizar status WA: %s", e)
+    return {"ok": True, "status": status}
 
 
 @app.get("/health")

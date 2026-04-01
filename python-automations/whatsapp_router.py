@@ -9,7 +9,8 @@ CORREÇÕES v2:
 - Sort key corrigido para lidar com timestamp int e string
 """
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+import os as _os
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from core import logger
@@ -17,6 +18,73 @@ from supabase_client import get_supabase
 from uazapi_client import uazapi
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
+
+WA_CONNECTOR_URL = _os.getenv("WA_CONNECTOR_URL", "http://localhost:3001")
+
+
+async def _connector_request(method: str, path: str, **kwargs) -> dict:
+    """Faz requisição HTTP para o conector WA interno."""
+    url = f"{WA_CONNECTOR_URL.rstrip('/')}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await getattr(client, method)(url, **kwargs)
+            return resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Conector WA indisponível: {e}")
+
+
+@router.get("/management/qr")
+async def wa_get_qr():
+    """Retorna QR code do conector interno para o frontend."""
+    return await _connector_request("get", "/qr")
+
+
+@router.get("/management/status")
+async def wa_get_status():
+    """Retorna status de conexão do conector interno."""
+    return await _connector_request("get", "/status")
+
+
+@router.post("/management/connect")
+async def wa_connect():
+    """Inicia/reinicia conexão WhatsApp (gera novo QR)."""
+    return await _connector_request("post", "/connect")
+
+
+@router.post("/management/disconnect")
+async def wa_disconnect_management():
+    """Desconecta o WhatsApp do conector interno."""
+    result = await _connector_request("post", "/disconnect")
+    # Atualiza status no banco
+    try:
+        db = get_supabase()
+        db.table("whatsapp_instances").update({"status": "disconnected"}).neq("id", "").execute()
+    except Exception:
+        pass
+    return result
+
+
+@router.post("/management/set-status")
+async def wa_set_status_internal(request: Request):
+    """Chamado pelo conector Node.js para atualizar status no banco."""
+    body = await request.json()
+    status = body.get("status", "disconnected")
+    try:
+        db = get_supabase()
+        inst = db.table("whatsapp_instances").select("id").limit(1).execute()
+        if inst.data:
+            db.table("whatsapp_instances").update({"status": status}).eq("id", inst.data[0]["id"]).execute()
+        else:
+            db.table("whatsapp_instances").insert({
+                "api_url": WA_CONNECTOR_URL,
+                "api_token": "internal",
+                "instance_name": "shopflow",
+                "instance_token": "internal",
+                "status": status,
+            }).execute()
+    except Exception as e:
+        logger.warning("Erro ao atualizar status WA no banco: %s", e)
+    return {"ok": True, "status": status}
 
 
 class SendMessageBody(BaseModel):
@@ -54,21 +122,29 @@ class DeleteChatBody(BaseModel):
 
 
 def _get_active_instance() -> dict:
-    """Busca a instância WhatsApp conectada no Supabase. Lança 503 se nenhuma disponível."""
+    """Busca a instância WhatsApp. Suporta conector interno (localhost:3001) e UAZAPI."""
     db = get_supabase()
     res = (
         db.table("whatsapp_instances")
-        .select("api_url, api_token, instance_token, instance_name")
-        .eq("status", "connected")
+        .select("api_url, api_token, instance_token, instance_name, status")
         .limit(1)
         .execute()
     )
     if not res.data:
         raise HTTPException(
             status_code=503,
+            detail="Nenhuma instância WhatsApp configurada. Conecte o WhatsApp primeiro.",
+        )
+    inst = res.data[0]
+    # Conector interno não precisa de status "connected" no banco para operar
+    api_url = inst.get("api_url", "")
+    is_internal = "localhost" in api_url or "127.0.0.1" in api_url
+    if not is_internal and inst.get("status") != "connected":
+        raise HTTPException(
+            status_code=503,
             detail="Nenhuma instância WhatsApp conectada. Escaneie o QR Code primeiro.",
         )
-    return res.data[0]
+    return inst
 
 
 # ─── Debug / Diagnóstico ──────────────────────────────────────────────────────
@@ -462,26 +538,6 @@ async def delete_conversation(body: DeleteChatBody):
 
 
 @router.delete("/instance")
-async def disconnect_whatsapp():
-    """Desconecta o WhatsApp e remove a instância da UAZAPI e do Banco de Dados."""
-    instance = _get_active_instance()
-
-    # 1. Deleta na UAZAPI
-    uaz_res = await uazapi.delete_instance(
-        api_url=instance["api_url"],
-        api_token=instance["api_token"],
-        instance_token=instance.get("instance_token")
-    )
-
-    # 2. Deleta no Supabase
-    try:
-        db = get_supabase()
-        db.table("whatsapp_instances").delete().eq("instance_name", instance["instance_name"]).execute()
-    except Exception as e:
-        logger.error(f"Erro ao remover instância do banco: {e}")
-
-    return {
-        "status": "ok",
-        "uazapi_response": uaz_res,
-        "message": "Instância desconectada e removida com sucesso."
-    }
+async def disconnect_whatsapp_legacy():
+    """Desconecta WhatsApp (compatibilidade com versão anterior)."""
+    return await wa_disconnect_management()
