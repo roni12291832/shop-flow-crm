@@ -774,9 +774,6 @@ Responda APENAS "SIM" se for um feedback positivo/elogio explícito sobre a comp
                             logger.warning("Watcher Agent falhou (não crítico): %s", e)
                             opportunity_action = f"existing_{old_stage}_watcher_error"
 
-                else:
-                    opportunity_action = f"existing_{existing_opp['stage']}_no_change"
-
             except Exception as e:
                 opportunity_action = f"error: {e}"
                 logger.error("Erro ao gerenciar oportunidade para %s (%s): %s", push_name, phone, e)
