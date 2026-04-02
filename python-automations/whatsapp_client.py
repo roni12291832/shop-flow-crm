@@ -30,6 +30,7 @@ class WhatsAppClient:
         self.qr_base64: Optional[str] = None
         self.connected: bool = False
         self.state: str = "disconnected"
+        self.last_error: Optional[str] = None
 
     # ── Supabase Storage ─────────────────────────────────────────────────
 
@@ -104,9 +105,10 @@ class WhatsAppClient:
             self._loop.run_until_complete(self._async_connect())
         except Exception as e:
             import traceback
-            logger.error("[WA] Loop encerrado: %s\n%s", e, traceback.format_exc())
+            tb = traceback.format_exc()
+            self.last_error = f"{type(e).__name__}: {e}\n{tb}"
+            logger.error("[WA] Loop encerrado com erro: %s\n%s", e, tb)
         finally:
-            # Garante que o estado reflita o crash
             self.connected = False
             if self.state != "reconnecting":
                 self.state = "disconnected"
@@ -281,10 +283,20 @@ class WhatsAppClient:
             return False
 
     def get_status(self) -> dict:
-        return {"connected": self.connected, "state": self.state, "hasQr": self.qr_base64 is not None}
+        return {
+            "connected": self.connected,
+            "state": self.state,
+            "hasQr": self.qr_base64 is not None,
+            "error": self.last_error,
+        }
 
     def get_qr(self) -> dict:
-        return {"qr": self.qr_base64, "connected": self.connected, "state": self.state}
+        return {
+            "qr": self.qr_base64,
+            "connected": self.connected,
+            "state": self.state,
+            "error": self.last_error,
+        }
 
 
 # Singleton global

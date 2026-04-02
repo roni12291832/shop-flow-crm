@@ -97,6 +97,57 @@ def _get_active_instance() -> dict:
     return {"api_url": "internal-neonize", "api_token": "internal", "instance_name": "shopflow"}
 
 
+# ─── Diagnóstico de inicialização ────────────────────────────────────────────
+
+@router.get("/diagnostic")
+async def wa_diagnostic():
+    """Diagnóstico completo — mostra por que o neonize não está funcionando."""
+    import sys, os
+
+    # 1. Testa importação do neonize
+    neonize_ok = False
+    neonize_error = None
+    try:
+        import neonize
+        neonize_ok = True
+        neonize_version = getattr(neonize, "__version__", "desconhecida")
+    except Exception as e:
+        neonize_error = str(e)
+        neonize_version = None
+
+    # 2. Testa diretório de sessão
+    session_dir = os.getenv("WA_SESSION_DIR", "./wa_sessions")
+    session_db = os.path.join(session_dir, "shopflow.db")
+    dir_writable = False
+    try:
+        os.makedirs(session_dir, exist_ok=True)
+        test_file = os.path.join(session_dir, ".write_test")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        dir_writable = True
+    except Exception as e:
+        dir_writable = str(e)
+
+    # 3. Thread do neonize
+    thread_alive = bool(wa_client._thread and wa_client._thread.is_alive())
+
+    return {
+        "wa_state": wa_client.state,
+        "wa_connected": wa_client.connected,
+        "wa_has_qr": wa_client.qr_base64 is not None,
+        "wa_last_error": wa_client.last_error,
+        "wa_thread_alive": thread_alive,
+        "neonize_importable": neonize_ok,
+        "neonize_version": neonize_version,
+        "neonize_import_error": neonize_error,
+        "session_dir_writable": dir_writable,
+        "session_db_exists": os.path.exists(session_db),
+        "python_version": sys.version,
+        "platform": sys.platform,
+    }
+
+
 # ─── Debug / Diagnóstico ──────────────────────────────────────────────────────
 
 @router.get("/debug")
