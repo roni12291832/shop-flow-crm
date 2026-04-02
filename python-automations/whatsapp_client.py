@@ -1,20 +1,24 @@
 from __future__ import annotations
 """
 Cliente WhatsApp — neonize (Python puro, sem Node.js).
-Gerencia QR code, conexão e envio de mensagens.
+Sessão persistida no Supabase Storage para sobreviver a redeploys no Koyeb.
 """
 import asyncio
 import base64
 import io
 import logging
 import os
+import shutil
 import threading
 from typing import Optional
 
 logger = logging.getLogger("wa_client")
 
 SESSION_DIR = os.getenv("WA_SESSION_DIR", "./wa_sessions")
-SESSION_DB = os.path.join(SESSION_DIR, "shopflow.db")
+SESSION_DB  = os.path.join(SESSION_DIR, "shopflow.db")
+
+STORAGE_BUCKET = "wa-sessions"
+STORAGE_PATH   = "shopflow/session.db"
 
 
 class WhatsAppClient:
@@ -22,11 +26,68 @@ class WhatsAppClient:
         self._client = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
+        self._save_task: Optional[asyncio.Task] = None
         self.qr_base64: Optional[str] = None
         self.connected: bool = False
         self.state: str = "disconnected"
 
-    # ── Helpers ──────────────────────────────────────────────────────────
+    # ── Supabase Storage ─────────────────────────────────────────────────
+
+    async def _ensure_bucket(self):
+        """Cria o bucket no Supabase Storage se não existir."""
+        try:
+            from supabase_client import get_supabase
+            db = get_supabase()
+            db.storage.create_bucket(STORAGE_BUCKET, options={"public": False})
+            logger.info("[WA] Bucket '%s' criado no Supabase Storage", STORAGE_BUCKET)
+        except Exception:
+            pass  # Já existe ou sem permissão — ignora
+
+    async def _restore_session(self) -> bool:
+        """
+        Baixa o arquivo de sessão do Supabase Storage antes de conectar.
+        Retorna True se restaurou com sucesso.
+        """
+        try:
+            from supabase_client import get_supabase
+            db = get_supabase()
+            os.makedirs(SESSION_DIR, exist_ok=True)
+            data: bytes = db.storage.from_(STORAGE_BUCKET).download(STORAGE_PATH)
+            if data:
+                with open(SESSION_DB, "wb") as f:
+                    f.write(data)
+                logger.info("[WA] ✅ Sessão restaurada do Supabase Storage (%d bytes)", len(data))
+                return True
+        except Exception as e:
+            logger.info("[WA] Nenhuma sessão salva encontrada: %s", e)
+        return False
+
+    async def _save_session(self):
+        """Salva o arquivo de sessão no Supabase Storage."""
+        if not os.path.exists(SESSION_DB):
+            return
+        try:
+            from supabase_client import get_supabase
+            db = get_supabase()
+            with open(SESSION_DB, "rb") as f:
+                data = f.read()
+            db.storage.from_(STORAGE_BUCKET).upload(
+                STORAGE_PATH,
+                data,
+                file_options={"upsert": "true", "content-type": "application/octet-stream"},
+            )
+            logger.info("[WA] ✅ Sessão salva no Supabase Storage (%d bytes)", len(data))
+        except Exception as e:
+            logger.warning("[WA] Falha ao salvar sessão: %s", e)
+
+    async def _periodic_save(self):
+        """Salva a sessão no Supabase a cada 5 minutos enquanto conectado."""
+        while self.connected:
+            await asyncio.sleep(300)
+            if self.connected:
+                await self._save_session()
+
+    # ── QR helper ────────────────────────────────────────────────────────
 
     def _qr_to_base64(self, data: bytes) -> str:
         import segno
@@ -34,7 +95,7 @@ class WhatsAppClient:
         segno.make_qr(data).save(buf, kind="png", scale=10)
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
-    # ── Internal async runner ────────────────────────────────────────────
+    # ── Async runner ─────────────────────────────────────────────────────
 
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()
@@ -42,16 +103,20 @@ class WhatsAppClient:
         try:
             self._loop.run_until_complete(self._async_connect())
         except Exception as e:
-            logger.error("WA loop encerrado: %s", e)
+            logger.error("[WA] Loop encerrado: %s", e)
 
     async def _async_connect(self):
         from neonize.aioze.client import NewAClient
         from neonize.events import ConnectedEv, DisconnectedEv, MessageEv
 
         os.makedirs(SESSION_DIR, exist_ok=True)
+
+        # Garante bucket e tenta restaurar sessão antes de conectar
+        await self._ensure_bucket()
+        await self._restore_session()
+
         self._client = NewAClient(SESSION_DB)
 
-        # QR callback
         async def on_qr(c, data: bytes):
             self.qr_base64 = self._qr_to_base64(data)
             self.state = "connecting"
@@ -64,8 +129,12 @@ class WhatsAppClient:
             self.connected = True
             self.state = "connected"
             self.qr_base64 = None
-            logger.info("[WA] Conectado!")
+            logger.info("[WA] ✅ Conectado!")
             await self._notify_db("connected")
+            # Salva sessão imediatamente após conectar
+            await self._save_session()
+            # Inicia save periódico
+            self._save_task = asyncio.create_task(self._periodic_save())
 
         @self._client.event(DisconnectedEv)
         async def on_disconnected(c, ev):
@@ -73,12 +142,16 @@ class WhatsAppClient:
             self.state = "disconnected"
             logger.info("[WA] Desconectado")
             await self._notify_db("disconnected")
+            if self._save_task:
+                self._save_task.cancel()
 
         @self._client.event(MessageEv)
         async def on_message(c, ev):
             asyncio.create_task(self._handle_message(ev))
 
         await self._client.connect()
+
+    # ── DB status ────────────────────────────────────────────────────────
 
     async def _notify_db(self, status: str):
         try:
@@ -98,18 +171,17 @@ class WhatsAppClient:
         except Exception as e:
             logger.warning("[WA] Falha ao atualizar status no DB: %s", e)
 
+    # ── Message handler ──────────────────────────────────────────────────
+
     async def _handle_message(self, ev):
         try:
             from neonize.utils.jid import Jid2String
             info = ev.Info
-            sender_jid = Jid2String(info.Sender) if info.Sender else ""
             remote_jid = Jid2String(info.Chat) if info.Chat else ""
 
-            # Ignora grupos e mensagens enviadas por mim
             if info.IsFromMe or remote_jid.endswith("@g.us") or remote_jid.endswith("@broadcast"):
                 return
 
-            # Extrai texto
             msg = ev.Message
             text = (
                 msg.conversation
@@ -123,16 +195,11 @@ class WhatsAppClient:
             push_name = info.PushName or ""
             timestamp = int(info.Timestamp.seconds) if info.Timestamp else 0
 
-            # Encaminha para o webhook interno (mesma estrutura que o wa-connector usava)
             payload = {
                 "event": "messages",
                 "instance": "shopflow",
                 "data": {
-                    "key": {
-                        "remoteJid": remote_jid,
-                        "fromMe": False,
-                        "id": info.ID or "",
-                    },
+                    "key": {"remoteJid": remote_jid, "fromMe": False, "id": info.ID or ""},
                     "pushName": push_name,
                     "message": {"conversation": text},
                     "messageTimestamp": timestamp,
@@ -154,16 +221,20 @@ class WhatsAppClient:
             return
         self.state = "connecting"
         self.qr_base64 = None
-        self._thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="wa-neonize"
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="wa-neonize")
         self._thread.start()
         logger.info("[WA] Client iniciado")
 
     def reconnect(self):
-        """Força desconexão e gera novo QR code."""
+        """Força novo QR (apaga sessão local para garantir QR fresco)."""
         logger.info("[WA] Reconectando...")
         self.disconnect()
+        # Remove sessão local para forçar novo QR
+        if os.path.exists(SESSION_DB):
+            try:
+                os.remove(SESSION_DB)
+            except Exception:
+                pass
         import time; time.sleep(1)
         self.start()
 
@@ -171,10 +242,9 @@ class WhatsAppClient:
         """Desconecta e limpa estado."""
         if self._client and self._loop and self._loop.is_running():
             try:
-                future = asyncio.run_coroutine_threadsafe(
+                asyncio.run_coroutine_threadsafe(
                     self._client.disconnect(), self._loop
-                )
-                future.result(timeout=5)
+                ).result(timeout=5)
             except Exception:
                 pass
         self.connected = False
@@ -194,10 +264,9 @@ class WhatsAppClient:
             if not clean.startswith("55"):
                 clean = "55" + clean
             jid = build_jid(clean)
-            future = asyncio.run_coroutine_threadsafe(
+            asyncio.run_coroutine_threadsafe(
                 self._client.send_message(jid, message), self._loop
-            )
-            future.result(timeout=30)
+            ).result(timeout=30)
             logger.info("[WA] Mensagem enviada para %s", phone)
             return True
         except Exception as e:
@@ -205,18 +274,10 @@ class WhatsAppClient:
             return False
 
     def get_status(self) -> dict:
-        return {
-            "connected": self.connected,
-            "state": self.state,
-            "hasQr": self.qr_base64 is not None,
-        }
+        return {"connected": self.connected, "state": self.state, "hasQr": self.qr_base64 is not None}
 
     def get_qr(self) -> dict:
-        return {
-            "qr": self.qr_base64,
-            "connected": self.connected,
-            "state": self.state,
-        }
+        return {"qr": self.qr_base64, "connected": self.connected, "state": self.state}
 
 
 # Singleton global
