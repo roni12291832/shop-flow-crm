@@ -103,7 +103,14 @@ class WhatsAppClient:
         try:
             self._loop.run_until_complete(self._async_connect())
         except Exception as e:
-            logger.error("[WA] Loop encerrado: %s", e)
+            import traceback
+            logger.error("[WA] Loop encerrado: %s\n%s", e, traceback.format_exc())
+        finally:
+            # Garante que o estado reflita o crash
+            self.connected = False
+            if self.state != "reconnecting":
+                self.state = "disconnected"
+            logger.info("[WA] Thread encerrada — reconexão disponível via /management/connect")
 
     async def _async_connect(self):
         from neonize.aioze.client import NewAClient
