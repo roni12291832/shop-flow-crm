@@ -1,90 +1,46 @@
 from __future__ import annotations
 """
-Rotas da aba WhatsApp — listagem de conversas e mensagens.
-Consome a UAZAPI GO V2 e enriquece com dados do Supabase.
-
-CORREÇÕES v2:
-- Usa os métodos corrigidos do uazapi_client (POST /chat/find, POST /message/find)
-- Adicionado endpoint de diagnóstico GET /whatsapp/debug para facilitar troubleshooting
-- Sort key corrigido para lidar com timestamp int e string
+Rotas da aba WhatsApp — gerenciamento de conexão e conversas.
+Usa neonize (Python puro) para conexão com WhatsApp.
 """
 import httpx
-import os as _os
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from core import logger
 from supabase_client import get_supabase
-from uazapi_client import uazapi
+from whatsapp_client import wa_client
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
-WA_CONNECTOR_URL = _os.getenv("WA_CONNECTOR_URL", "http://localhost:3001")
 
+# ─── Gerenciamento de conexão (QR Code) ──────────────────────────────────────
 
-async def _connector_request(method: str, path: str, **kwargs) -> dict:
-    """Faz requisição HTTP para o conector WA interno."""
-    url = f"{WA_CONNECTOR_URL.rstrip('/')}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await getattr(client, method)(url, **kwargs)
-            return resp.json()
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Conector WA indisponível: {e}")
+@router.get("/management/status")
+async def wa_get_status():
+    return wa_client.get_status()
 
 
 @router.get("/management/qr")
 async def wa_get_qr():
-    """Retorna QR code do conector interno para o frontend."""
-    return await _connector_request("get", "/qr")
-
-
-@router.get("/management/status")
-async def wa_get_status():
-    """Retorna status de conexão do conector interno."""
-    return await _connector_request("get", "/status")
+    return wa_client.get_qr()
 
 
 @router.post("/management/connect")
 async def wa_connect():
-    """Inicia/reinicia conexão WhatsApp (gera novo QR)."""
-    return await _connector_request("post", "/connect")
+    wa_client.reconnect()
+    return {"ok": True, "message": "Iniciando conexão..."}
 
 
 @router.post("/management/disconnect")
 async def wa_disconnect_management():
-    """Desconecta o WhatsApp do conector interno."""
-    result = await _connector_request("post", "/disconnect")
-    # Atualiza status no banco
+    wa_client.disconnect()
     try:
         db = get_supabase()
         db.table("whatsapp_instances").update({"status": "disconnected"}).neq("id", "").execute()
     except Exception:
         pass
-    return result
-
-
-@router.post("/management/set-status")
-async def wa_set_status_internal(request: Request):
-    """Chamado pelo conector Node.js para atualizar status no banco."""
-    body = await request.json()
-    status = body.get("status", "disconnected")
-    try:
-        db = get_supabase()
-        inst = db.table("whatsapp_instances").select("id").limit(1).execute()
-        if inst.data:
-            db.table("whatsapp_instances").update({"status": status}).eq("id", inst.data[0]["id"]).execute()
-        else:
-            db.table("whatsapp_instances").insert({
-                "api_url": WA_CONNECTOR_URL,
-                "api_token": "internal",
-                "instance_name": "shopflow",
-                "instance_token": "internal",
-                "status": status,
-            }).execute()
-    except Exception as e:
-        logger.warning("Erro ao atualizar status WA no banco: %s", e)
-    return {"ok": True, "status": status}
+    return {"ok": True}
 
 
 class SendMessageBody(BaseModel):
@@ -122,29 +78,13 @@ class DeleteChatBody(BaseModel):
 
 
 def _get_active_instance() -> dict:
-    """Busca a instância WhatsApp. Suporta conector interno (localhost:3001) e UAZAPI."""
-    db = get_supabase()
-    res = (
-        db.table("whatsapp_instances")
-        .select("api_url, api_token, instance_token, instance_name, status")
-        .limit(1)
-        .execute()
-    )
-    if not res.data:
+    """Verifica se WhatsApp está conectado (neonize)."""
+    if not wa_client.connected:
         raise HTTPException(
             status_code=503,
-            detail="Nenhuma instância WhatsApp configurada. Conecte o WhatsApp primeiro.",
+            detail="WhatsApp não conectado. Escaneie o QR Code primeiro.",
         )
-    inst = res.data[0]
-    # Conector interno não precisa de status "connected" no banco para operar
-    api_url = inst.get("api_url", "")
-    is_internal = "localhost" in api_url or "127.0.0.1" in api_url
-    if not is_internal and inst.get("status") != "connected":
-        raise HTTPException(
-            status_code=503,
-            detail="Nenhuma instância WhatsApp conectada. Escaneie o QR Code primeiro.",
-        )
-    return inst
+    return {"api_url": "internal-neonize", "api_token": "internal", "instance_name": "shopflow"}
 
 
 # ─── Debug / Diagnóstico ──────────────────────────────────────────────────────
@@ -376,17 +316,9 @@ async def send_message(body: SendMessageBody):
         .replace("@lid", "")
     )
 
-    result = await uazapi.send_text(
-        api_url=instance["api_url"],
-        api_token=instance["api_token"],
-        instance_name=instance.get("instance_name", ""),
-        phone=phone,
-        message=body.message,
-        instance_token=instance.get("instance_token"),
-    )
-
-    if "error" in result:
-        raise HTTPException(status_code=502, detail=f"Erro ao enviar: {result['error']}")
+    sent = wa_client.send_text(phone, body.message)
+    if not sent:
+        raise HTTPException(status_code=502, detail="Erro ao enviar mensagem. Verifique se o WhatsApp está conectado.")
 
     # Salva no CRM se o cliente existir
     try:

@@ -58,40 +58,14 @@ except Exception as _ne:
     _NPS_ENABLED = False
 
 
-async def _setup_webhooks_on_startup():
-    """
-    Registra automaticamente a URL do webhook no UAZAPI para todas as instâncias.
-    Executado a cada boot do serviço — garante que deploys no Koyeb não quebrem a integração.
-    """
-    from supabase_client import get_supabase
-    from uazapi_client import uazapi
-
-    s = get_settings()
-    if not s.webhook_url:
-        logger.warning("WEBHOOK_URL não configurado — webhook não será auto-configurado no UAZAPI")
-        return
-
+async def _start_whatsapp_client():
+    """Inicia o cliente WhatsApp (neonize) em background ao subir o servidor."""
     try:
-        db = get_supabase()
-        instances = db.table("whatsapp_instances").select("*").execute()
-        if not instances.data:
-            logger.info("Nenhuma instância WhatsApp encontrada para configurar webhook")
-            return
-
-        for inst in instances.data:
-            try:
-                result = await uazapi.set_webhook(
-                    inst["api_url"],
-                    inst["api_token"],
-                    inst["instance_name"],
-                    s.webhook_url,
-                    inst.get("instance_token"),
-                )
-                logger.info(f"✅ Webhook auto-configurado para '{inst['instance_name']}': {result}")
-            except Exception as e:
-                logger.warning(f"⚠️  Falha ao configurar webhook para '{inst['instance_name']}': {e}")
+        from whatsapp_client import wa_client
+        wa_client.start()
+        logger.info("✅ WhatsApp client (neonize) iniciado")
     except Exception as e:
-        logger.warning(f"⚠️  Erro ao buscar instâncias para auto-configurar webhook: {e}")
+        logger.warning("⚠️  Falha ao iniciar WhatsApp client: %s", e)
 
 # ─── Scheduler ────────────────────────────────────────────────────────
 scheduler = AsyncIOScheduler()
@@ -201,8 +175,8 @@ async def lifespan(app: FastAPI):
     logger.info("   📲 Follow-up automático: a cada 1h")
     logger.info(f"   🌐 CORS origin: {_allowed_origins}")
 
-    # Auto-configura webhook no UAZAPI para garantir que deploys não quebrem a integração
-    asyncio.create_task(_setup_webhooks_on_startup())
+    # Inicia cliente WhatsApp (neonize)
+    asyncio.create_task(_start_whatsapp_client())
 
     yield
 
@@ -324,38 +298,6 @@ async def jarvis_report_now():
     await job_daily_report()
     return {"status": "ok", "message": "Relatório enviado!"}
 
-
-@app.post("/wa/internal/set-status")
-async def wa_internal_set_status(request: Request):
-    """Chamado pelo conector Node.js interno para atualizar status no DB."""
-    from fastapi import Request as _Request
-    body = await request.json()
-    status = body.get("status", "disconnected")
-    try:
-        db_s = get_supabase()
-        inst = db_s.table("whatsapp_instances").select("id").limit(1).execute()
-        from config import get_settings as _gs
-        _s = _gs()
-        connector_url = "http://localhost:3001"
-        if inst.data:
-            db_s.table("whatsapp_instances").update({
-                "status": status,
-                "api_url": connector_url,
-                "api_token": "internal",
-                "instance_token": "internal",
-                "instance_name": "shopflow",
-            }).eq("id", inst.data[0]["id"]).execute()
-        else:
-            db_s.table("whatsapp_instances").insert({
-                "api_url": connector_url,
-                "api_token": "internal",
-                "instance_name": "shopflow",
-                "instance_token": "internal",
-                "status": status,
-            }).execute()
-    except Exception as e:
-        logger.warning("Erro ao atualizar status WA: %s", e)
-    return {"ok": True, "status": status}
 
 
 @app.get("/health")
