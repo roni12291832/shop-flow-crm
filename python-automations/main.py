@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.jobstores.memory import MemoryJobStore
 
 # core deve ser importado primeiro — inicializa o sistema de logs para todos os módulos
 from core import logger
@@ -59,22 +60,74 @@ except Exception as _ne:
 
 
 async def _start_whatsapp_client():
-    """Inicia o cliente WhatsApp (neonize) em background ao subir o servidor."""
+    """
+    Inicia o cliente WhatsApp (neonize) em background ao subir o servidor.
+    Aguarda 10s para deixar o servidor estabilizar antes de iniciar o neonize.
+    """
+    await asyncio.sleep(10)  # deixa o servidor subir completamente primeiro
     try:
         from whatsapp_client import wa_client
-        wa_client.start()
-        logger.info("✅ WhatsApp client (neonize) iniciado")
+        if not wa_client.connected and not (wa_client._thread and wa_client._thread.is_alive()):
+            wa_client.start()
+            logger.info("✅ WhatsApp client (neonize) iniciado")
+        else:
+            logger.info("WhatsApp client já está rodando")
     except Exception as e:
-        logger.warning("⚠️  Falha ao iniciar WhatsApp client: %s", e)
+        import traceback
+        logger.warning("⚠️  Falha ao iniciar WhatsApp client: %s\n%s", e, traceback.format_exc())
 
 # ─── Scheduler ────────────────────────────────────────────────────────
-scheduler = AsyncIOScheduler()
+# Inicializado no lifespan para suportar SQLAlchemy job store (distributed locking)
+scheduler: AsyncIOScheduler | None = None
+
+
+def _build_scheduler() -> AsyncIOScheduler:
+    """
+    Cria o scheduler com o job store mais robusto disponível.
+
+    Se DATABASE_URL estiver configurado → usa SQLAlchemyJobStore (PostgreSQL).
+    O APScheduler usa SELECT FOR UPDATE internamente, garantindo que apenas
+    UMA instância (de N réplicas no Koyeb) execute cada job por vez.
+
+    Sem DATABASE_URL → cai para MemoryJobStore com coalesce=True para ao
+    menos evitar execuções em cascata na mesma instância.
+    """
+    s = get_settings()
+
+    job_defaults = {
+        "coalesce": True,       # se atrasou, roda apenas 1x ao retornar
+        "max_instances": 1,     # nunca executa a mesma job em paralelo
+        "misfire_grace_time": 60,  # aceita até 60s de atraso antes de descartar
+    }
+
+    if s.database_url:
+        try:
+            from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+            jobstores = {"default": SQLAlchemyJobStore(url=s.database_url)}
+            sched = AsyncIOScheduler(jobstores=jobstores, job_defaults=job_defaults, timezone="UTC")
+            logger.info("✅ Scheduler: PostgreSQL Job Store ativo (distributed locking habilitado)")
+            return sched
+        except Exception as e:
+            logger.warning("⚠️  Falha ao criar PostgreSQL Job Store: %s — usando MemoryJobStore", e)
+
+    logger.warning(
+        "⚠️  DATABASE_URL não configurado — usando MemoryJobStore. "
+        "Se rodar múltiplas instâncias no Koyeb, jobs serão duplicados. "
+        "Configure DATABASE_URL (PostgreSQL do Supabase) para corrigir."
+    )
+    return AsyncIOScheduler(
+        jobstores={"default": MemoryJobStore()},
+        job_defaults=job_defaults,
+        timezone="UTC",
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicia o scheduler ao subir o servidor, desliga ao parar."""
+    global scheduler
     s = get_settings()
+    scheduler = _build_scheduler()
 
     # Relatório diário
     scheduler.add_job(
@@ -243,7 +296,7 @@ async def root():
     """Health check e informações do serviço."""
     jobs = [
         {"id": job.id, "name": job.name, "next_run": str(job.next_run_time)}
-        for job in scheduler.get_jobs()
+        for job in (scheduler.get_jobs() if scheduler else [])
     ]
     return {
         "service": "Shop Flow CRM Automações",

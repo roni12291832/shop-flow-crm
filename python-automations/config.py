@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # URL do conector WhatsApp interno (Baileys)
     wa_connector_url: str = "http://localhost:3001"
 
+    # PostgreSQL direto do Supabase — necessário para distributed job locking
+    # (evita jobs duplicados com múltiplas instâncias no Koyeb)
+    # Formato: postgresql://postgres.[ref]:[PASSWORD]@aws-0-[region].pooler.supabase.com:6543/postgres
+    # Encontre em: Supabase Dashboard → Settings → Database → Connection String → URI (Transaction pooler)
+    database_url: str = ""
+
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

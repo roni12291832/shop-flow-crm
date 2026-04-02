@@ -23,7 +23,17 @@ async def wa_get_status():
 
 @router.get("/management/qr")
 async def wa_get_qr():
-    return wa_client.get_qr()
+    try:
+        status = wa_client.get_qr()
+        # Se neonize ainda não iniciou, tenta iniciar automaticamente
+        if not status.get("connected") and not status.get("qr") and wa_client.state == "disconnected":
+            if not (wa_client._thread and wa_client._thread.is_alive()):
+                logger.info("[WA] Auto-iniciando conexão via /management/qr")
+                wa_client.start()
+        return status
+    except Exception as e:
+        logger.error("[WA] Erro em wa_get_qr: %s", e)
+        return {"qr": None, "connected": False, "state": "error", "error": str(e)}
 
 
 @router.post("/management/connect")
