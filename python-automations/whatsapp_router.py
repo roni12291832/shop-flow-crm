@@ -130,36 +130,102 @@ async def wa_get_status():
 
 @router.get("/management/qr")
 async def wa_get_qr():
-    """Retorna o QR Code da instância UAZAPI para escanear com o WhatsApp."""
+    """
+    Retorna o QR Code para escanear com o WhatsApp.
+    Fluxo: busca instância no Supabase → se não existir, cria uma via UAZAPI admin →
+    salva token no Supabase → chama /instance/qrcode com o instance_token.
+    """
     s = get_settings()
+
+    if not s.uazapi_admin_token:
+        return {"qr": None, "connected": False, "state": "error", "error": "UAZAPI_ADMIN_TOKEN não configurado"}
+
+    api_url = s.uazapi_base_url.rstrip("/")
     instance = _get_any_instance()
+    instance_token: str | None = instance.get("instance_token") if instance else None
 
-    api_url = (instance.get("api_url") if instance else None) or s.uazapi_base_url
-    instance_token = (
-        (instance.get("instance_token") or instance.get("api_token")) if instance else None
-    ) or s.uazapi_admin_token
+    async with httpx.AsyncClient(timeout=20) as client:
+        # 1. Se não há instance_token, cria instância na UAZAPI
+        if not instance_token:
+            logger.info("[WA] Nenhuma instância encontrada — criando via UAZAPI admin")
+            try:
+                create_resp = await client.post(
+                    f"{api_url}/instance/create",
+                    headers={"token": s.uazapi_admin_token, "Content-Type": "application/json"},
+                    json={"name": "shopflow"},
+                )
+                create_data = create_resp.json()
+                logger.info("[WA] Resposta create instance: %s", str(create_data)[:300])
+                instance_token = (
+                    create_data.get("token")
+                    or create_data.get("instance_token")
+                    or create_data.get("apikey")
+                    or create_data.get("key")
+                )
+                if not instance_token:
+                    return {"qr": None, "connected": False, "state": "error",
+                            "error": f"UAZAPI não retornou token. Resposta: {create_data}"}
 
-    if not instance_token:
-        return {"qr": None, "connected": False, "state": "disconnected", "error": "UAZAPI_ADMIN_TOKEN não configurado"}
+                # Salva no Supabase
+                try:
+                    db = get_supabase()
+                    db.table("whatsapp_instances").upsert({
+                        "instance_name": create_data.get("name") or "shopflow",
+                        "instance_token": instance_token,
+                        "api_url": api_url,
+                        "api_token": s.uazapi_admin_token,
+                        "status": "pending",
+                    }, on_conflict="instance_name").execute()
+                except Exception as dbe:
+                    logger.warning("[WA] Erro ao salvar instância no Supabase: %s", dbe)
 
-    async with httpx.AsyncClient(timeout=15) as client:
+            except Exception as e:
+                logger.error("[WA] Erro ao criar instância: %s", e)
+                return {"qr": None, "connected": False, "state": "error", "error": f"Erro ao criar instância: {e}"}
+
+        # 2. Verifica se já está conectado
         try:
-            # Tenta obter o QR code da instância
-            resp = await client.get(
-                f"{api_url.rstrip('/')}/instance/qrcode",
+            status_resp = await client.get(
+                f"{api_url}/instance/status",
                 headers={"token": instance_token},
             )
-            data = resp.json()
+            status_data = status_resp.json()
+            logger.info("[WA] Status instância: %s", str(status_data)[:200])
+            if status_data.get("connected") or status_data.get("state") in ("open", "connected"):
+                # Atualiza Supabase para connected
+                try:
+                    db = get_supabase()
+                    db.table("whatsapp_instances").update({"status": "connected"}).eq("instance_token", instance_token).execute()
+                except Exception:
+                    pass
+                return {"qr": None, "connected": True, "state": "connected"}
+        except Exception as e:
+            logger.warning("[WA] Erro ao verificar status: %s", e)
 
-            # Verifica se já está conectado
-            if data.get("connected") or data.get("state") in ("open", "connected"):
+        # 3. Busca QR code
+        try:
+            qr_resp = await client.get(
+                f"{api_url}/instance/qrcode",
+                headers={"token": instance_token},
+            )
+            qr_data = qr_resp.json()
+            logger.info("[WA] Resposta QR (status %s): %s", qr_resp.status_code, str(qr_data)[:300])
+
+            # Verifica se já conectou durante a chamada
+            if qr_data.get("connected") or qr_data.get("state") in ("open", "connected"):
                 return {"qr": None, "connected": True, "state": "connected"}
 
-            qr = data.get("qrcode") or data.get("qr") or data.get("base64")
+            qr = (
+                qr_data.get("qrcode")
+                or qr_data.get("qr")
+                or qr_data.get("base64")
+                or qr_data.get("code")
+            )
             return {
                 "qr": qr,
                 "connected": False,
-                "state": data.get("state", "waiting_qr"),
+                "state": qr_data.get("state", "waiting_qr"),
+                "debug": str(qr_data)[:200] if not qr else None,
             }
         except Exception as e:
             logger.error("[WA] Erro ao buscar QR: %s", e)
