@@ -7,7 +7,6 @@ Para rodar:
   pip install -r requirements.txt
   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,23 +57,6 @@ except Exception as _ne:
     nps_router = None
     _NPS_ENABLED = False
 
-
-async def _start_whatsapp_client():
-    """
-    Inicia o cliente WhatsApp (neonize) em background ao subir o servidor.
-    Aguarda 10s para deixar o servidor estabilizar antes de iniciar o neonize.
-    """
-    await asyncio.sleep(10)  # deixa o servidor subir completamente primeiro
-    try:
-        from whatsapp_client import wa_client
-        if not wa_client.connected and not (wa_client._thread and wa_client._thread.is_alive()):
-            wa_client.start()
-            logger.info("✅ WhatsApp client (neonize) iniciado")
-        else:
-            logger.info("WhatsApp client já está rodando")
-    except Exception as e:
-        import traceback
-        logger.warning("⚠️  Falha ao iniciar WhatsApp client: %s\n%s", e, traceback.format_exc())
 
 # ─── Scheduler ────────────────────────────────────────────────────────
 # Inicializado no lifespan para suportar SQLAlchemy job store (distributed locking)
@@ -227,9 +209,6 @@ async def lifespan(app: FastAPI):
     logger.info("   ⚠️  Leads parados: a cada 12h")
     logger.info("   📲 Follow-up automático: a cada 1h")
     logger.info(f"   🌐 CORS origin: {_allowed_origins}")
-
-    # Inicia cliente WhatsApp (neonize)
-    asyncio.create_task(_start_whatsapp_client())
 
     yield
 

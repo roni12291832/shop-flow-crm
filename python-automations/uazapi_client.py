@@ -1,38 +1,42 @@
 from __future__ import annotations
 """
-Cliente WhatsApp — adaptador para o conector Baileys interno (localhost:3001).
+Cliente para a API da UAZAPI GO V2.
+Documentação: https://docs.uazapi.com/
 
-Mantém a mesma assinatura de métodos do cliente UAZAPI anterior para que todos
-os chamadores (webhooks, followup, campaigns, crons, etc.) funcionem sem alteração.
+Autenticação: header "token" com o token da instância.
+Base URL: configurada por instância no banco (ex: https://nexaflow.uazapi.com)
 
-Os parâmetros api_url / api_token / instance_name / instance_token são aceitos
-mas ignorados — todas as chamadas vão para http://localhost:3001.
+CORREÇÕES v2:
+- send_text:    POST /send/text                  (era /message/sendText/{instance})
+- get_chats:    POST /chat/find                  (era GET /chats)
+- get_messages: POST /message/find               (era GET /messages/{chat_id})
+- set_webhook:  POST /webhook                    (correto, mantido)
 """
 import httpx
 import asyncio
 import random
 import logging
-from config import get_settings
 
-logger = logging.getLogger("wa_connector")
+logger = logging.getLogger("uazapi")
 
-CONNECTOR_BASE = "http://localhost:3001"
 
 _HTTP_ERROR_MAP = {
-    400: ("bad_request",   "Requisição inválida"),
-    404: ("not_found",     "Número não encontrado no WhatsApp"),
-    429: ("rate_limit",    "Limite de envios atingido — aguardar antes de continuar"),
-    500: ("server_error",  "Erro interno do conector"),
-    503: ("unavailable",   "WhatsApp não conectado — escaneie o QR code"),
+    401: ("auth_error",   "Token inválido ou expirado — reconecte a instância"),
+    403: ("forbidden",    "Sem permissão para esta operação"),
+    404: ("not_found",    "Número não encontrado no WhatsApp"),
+    429: ("rate_limit",   "Limite de envios atingido — aguardar antes de continuar"),
+    500: ("server_error", "Erro interno da UAZAPI"),
+    503: ("unavailable",  "UAZAPI temporariamente indisponível"),
 }
 
 
 def _structured_error(e: httpx.HTTPStatusError, phone: str = "") -> dict:
+    """Retorna erro estruturado com error_code para tratamento preciso no chamador."""
     code, description = _HTTP_ERROR_MAP.get(
         e.response.status_code,
         ("http_error", f"HTTP {e.response.status_code}"),
     )
-    logger.error("wa_connector %s para %s: %s", code, phone, e.response.text[:200])
+    logger.error("UAZAPI %s para %s: %s", code, phone, e.response.text[:200])
     return {
         "error":       description,
         "error_code":  code,
@@ -41,125 +45,231 @@ def _structured_error(e: httpx.HTTPStatusError, phone: str = "") -> dict:
 
 
 class UazapiClient:
-    """Thin wrapper sobre o conector Baileys interno. Interface idêntica ao cliente UAZAPI."""
+    """Cliente assíncrono para a UAZAPI GO V2."""
 
     # ─── Envio de mensagens ───────────────────────────────────────────────
 
     async def send_text(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        instance_name: str = "",
-        phone: str = "",
-        message: str = "",
+        api_url: str,
+        api_token: str,
+        instance_name: str,
+        phone: str,
+        message: str,
         instance_token: str | None = None,
     ) -> dict:
-        url = f"{CONNECTOR_BASE}/send/text"
-        payload = {"number": self._format_phone(phone), "text": message}
+        """
+        Envia mensagem de texto.
+        Endpoint UAZAPI GO V2: POST /send/text
+        Header: token (instance_token preferencial, fallback api_token)
+        O campo 'number' aceita: número internacional, JID com @s.whatsapp.net ou @lid
+        """
+        url = f"{api_url.rstrip('/')}/send/text"
+        token = instance_token or api_token
+        headers = {
+            "Content-Type": "application/json",
+            "token": token,
+        }
+        payload = {
+            "number": self._format_phone(phone),
+            "text": message,
+        }
         async with httpx.AsyncClient(timeout=30) as client:
             try:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
-                logger.info("Mensagem enviada para %s", phone)
+                logger.info(f"Mensagem enviada para {phone}")
                 return resp.json()
             except httpx.HTTPStatusError as e:
                 return _structured_error(e, phone)
             except Exception as e:
-                logger.error("Erro ao enviar para %s: %s", phone, e)
+                logger.error(f"Erro ao enviar para {phone}: {e}")
                 return {"error": str(e), "error_code": "network_error"}
 
     async def send_media(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        phone: str = "",
-        media_type: str = "",
-        file: str = "",
+        api_url: str,
+        api_token: str,
+        phone: str,
+        media_type: str,
+        file: str,
         text: str | None = None,
         doc_name: str | None = None,
         instance_token: str | None = None,
         **kwargs,
     ) -> dict:
-        url = f"{CONNECTOR_BASE}/send/media"
-        payload: dict = {
-            "number":    self._format_phone(phone),
-            "mediaType": media_type,
-            "file":      file,
+        """
+        Envia mídia (imagem, vídeo, áudio, documento, figurinha).
+        Endpoint: POST /send/media
+        """
+        url = f"{api_url.rstrip('/')}/send/media"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+
+        payload = {
+            "number": self._format_phone(phone),
+            "type": media_type,
+            "file": file,
         }
         if text:
             payload["text"] = text
         if doc_name:
-            payload["doc_name"] = doc_name
+            payload["docName"] = doc_name
+
+        # Adiciona argumentos extras (delay, mentions, etc)
+        payload.update(kwargs)
+
         async with httpx.AsyncClient(timeout=60) as client:
             try:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
-                logger.error("Erro ao enviar mídia (%s) para %s: %s", media_type, phone, e)
+                logger.error(f"Erro ao enviar mídia ({media_type}) para {phone}: {e}")
                 return {"error": str(e), "error_code": "network_error"}
 
     async def send_location(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        phone: str = "",
-        latitude: float = 0.0,
-        longitude: float = 0.0,
+        api_url: str,
+        api_token: str,
+        phone: str,
+        latitude: float,
+        longitude: float,
         name: str | None = None,
         address: str | None = None,
         instance_token: str | None = None,
         **kwargs,
     ) -> dict:
-        # Conector Baileys não implementa /send/location — fallback para texto
-        text = f"📍 Localização: {name or ''}\n{address or ''}\nhttps://maps.google.com/?q={latitude},{longitude}"
-        return await self.send_text(phone=phone, message=text)
+        """
+        Envia localização geográfica.
+        Endpoint: POST /send/location
+        """
+        url = f"{api_url.rstrip('/')}/send/location"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+
+        payload = {
+            "number": self._format_phone(phone),
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+        if name:
+            payload["name"] = name
+        if address:
+            payload["address"] = address
+
+        payload.update(kwargs)
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao enviar localização para {phone}: {e}")
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_message(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        message_id: str = "",
+        api_url: str,
+        api_token: str,
+        message_id: str,
         instance_token: str | None = None,
     ) -> dict:
-        logger.info("delete_message: não suportado pelo conector interno, ignorado")
-        return {"success": True, "skipped": True}
+        """
+        Apaga uma mensagem para todos.
+        Endpoint: POST /message/delete
+        """
+        url = f"{api_url.rstrip('/')}/message/delete"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        payload = {"id": message_id}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao apagar mensagem {message_id}: {e}")
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_chat(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        phone: str = "",
+        api_url: str,
+        api_token: str,
+        phone: str,
         delete_chat_db: bool = True,
         delete_messages_db: bool = True,
         delete_chat_whatsapp: bool = True,
         instance_token: str | None = None,
     ) -> dict:
-        logger.info("delete_chat: não suportado pelo conector interno, ignorado")
-        return {"success": True, "skipped": True}
+        """
+        Deleta um chat e suas mensagens.
+        Endpoint: POST /chat/delete
+        """
+        url = f"{api_url.rstrip('/')}/chat/delete"
+        token = instance_token or api_token
+        headers = {"token": token, "Content-Type": "application/json"}
+        payload = {
+            "number": self._format_phone(phone),
+            "deleteChatDB": delete_chat_db,
+            "deleteMessagesDB": delete_messages_db,
+            "deleteChatWhatsApp": delete_chat_whatsapp,
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao deletar chat {phone}: {e}")
+                return {"error": str(e), "error_code": "network_error"}
 
     async def delete_instance(
         self,
-        api_url: str = "",
-        api_token: str = "",
+        api_url: str,
+        api_token: str,
         instance_token: str | None = None,
     ) -> dict:
-        logger.info("delete_instance: não suportado pelo conector interno, ignorado")
-        return {"success": True, "skipped": True}
+        """
+        Deleta a instância do sistema UAZAPI.
+        Endpoint: DELETE /instance
+        """
+        url = f"{api_url.rstrip('/')}/instance"
+        token = instance_token or api_token
+        headers = {
+            "token": token,
+            "Accept": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.delete(url, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao deletar instância UAZAPI: {e}")
+                return {"error": str(e), "error_code": "network_error"}
 
     async def send_bulk_campaign(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        instance_name: str = "",
-        contacts: list[dict] | None = None,
-        messages: list[str] | None = None,
+        api_url: str,
+        api_token: str,
+        instance_name: str,
+        contacts: list[dict],
+        messages: list[str],
         min_delay: int = 15,
         max_delay: int = 60,
         instance_token: str | None = None,
     ) -> dict:
-        contacts = contacts or []
-        messages = messages or []
+        """
+        Disparo em massa anti-bloqueio.
+        - contacts: lista de {"phone": "5511...", "name": "João", ...}
+        - messages: lista com pelo menos 15 variações de mensagem
+        - Cada contato recebe 1 mensagem aleatória com delay aleatório entre envios
+        """
         if len(messages) < 15:
             return {
                 "error": "OBRIGATÓRIO: envie pelo menos 15 variações de mensagem para evitar bloqueio do WhatsApp."
@@ -178,65 +288,281 @@ class UazapiClient:
             msg_template = random.choice(messages)
             personalized_msg = self._personalize_message(msg_template, contact)
 
-            resp = await self.send_text(phone=phone, message=personalized_msg)
+            resp = await self.send_text(
+                api_url, api_token, instance_name, phone, personalized_msg, instance_token
+            )
             if "error" in resp:
                 results["failed"] += 1
                 results["errors"].append({"phone": phone, "error": resp["error"]})
                 error_code = resp.get("error_code", "")
                 if error_code == "rate_limit":
-                    logger.warning("Rate limit — campanha interrompida após %d envios", results["sent"])
+                    logger.warning("Rate limit UAZAPI — campanha interrompida após %d envios", results["sent"])
                     results["errors"].append({"phone": "SISTEMA", "error": "Rate limit atingido — campanha pausada"})
+                    break
+                elif error_code == "auth_error":
+                    logger.error("Token inválido — campanha interrompida")
+                    results["errors"].append({"phone": "SISTEMA", "error": "Token WhatsApp inválido"})
                     break
             else:
                 results["sent"] += 1
 
             if i < len(shuffled_contacts) - 1:
                 delay = random.uniform(min_delay, max_delay)
-                logger.info("Aguardando %.1fs antes do próximo envio...", delay)
+                logger.info(f"Aguardando {delay:.1f}s antes do próximo envio...")
                 await asyncio.sleep(delay)
 
         return results
 
-    # ─── Webhook (no-op — conector usa URL interna fixa) ─────────────────
+    # ─── Webhook ──────────────────────────────────────────────────────────
 
     async def set_webhook(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        instance_name: str = "",
-        webhook_url: str = "",
+        api_url: str,
+        api_token: str,
+        instance_name: str,
+        webhook_url: str,
         instance_token: str | None = None,
     ) -> dict:
-        logger.info("set_webhook: conector interno usa URL fixa, ignorado")
-        return {"success": True, "skipped": True}
+        """
+        Configura URL do webhook na UAZAPI GO V2.
+        Endpoint: POST /webhook
+        Header: token (instance_token)
+        """
+        url = f"{api_url.rstrip('/')}/webhook"
+        token = instance_token or api_token
+        headers = {
+            "token": token,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "enabled": True,
+            "url": webhook_url,
+            "events": ["messages", "connection", "chats"],
+            "excludeMessages": ["wasSentByApi"],
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                logger.info(f"Webhook configurado (status {resp.status_code}): {resp.text[:200]}")
+                return resp.json()
+            except Exception as e:
+                logger.error(f"Erro ao configurar webhook: {e}")
+                return {"error": str(e)}
 
-    # ─── Conversas (retorna vazio — Baileys não persiste histórico) ──────
+    # ─── Conversas ────────────────────────────────────────────────────────
 
     async def get_chats(
-        self, api_url: str = "", instance_token: str = "", count: int = 50
+        self, api_url: str, instance_token: str, count: int = 50
     ) -> list[dict]:
-        return []
+        """
+        Retorna as últimas conversas da instância.
+        Endpoint UAZAPI GO V2: POST /chat/find
+        Body: { "limit": N }
+        Header: token: <instance_token>
+        """
+        url = f"{api_url.rstrip('/')}/chat/find"
+        headers = {
+            "token": instance_token,
+            "Content-Type": "application/json",
+        }
+        payload = {"limit": count}
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                logger.debug(f"get_chats raw response type={type(data)}: {str(data)[:300]}")
+
+                if isinstance(data, list):
+                    raw_chats = data
+                elif isinstance(data, dict):
+                    raw_chats = (
+                        data.get("chats")
+                        or data.get("data")
+                        or data.get("result")
+                        or []
+                    )
+                else:
+                    raw_chats = []
+
+                return [self._normalize_chat(c) for c in raw_chats]
+
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    "Erro HTTP ao buscar chats: %s — %s",
+                    e.response.status_code,
+                    e.response.text,
+                )
+                return []
+            except Exception as e:
+                logger.error("Erro ao buscar chats: %s", e)
+                return []
 
     async def get_messages(
-        self, api_url: str = "", instance_token: str = "", chat_id: str = "", count: int = 30
+        self, api_url: str, instance_token: str, chat_id: str, count: int = 30
     ) -> list[dict]:
-        return []
+        """
+        Retorna as mensagens de uma conversa.
+        Endpoint UAZAPI GO V2: POST /message/find
+        Body: { "chatid": "<jid>", "limit": N }
+        Header: token: <instance_token>
+        """
+        if "@" not in chat_id:
+            chat_id = f"{chat_id}@s.whatsapp.net"
+
+        url = f"{api_url.rstrip('/')}/message/find"
+        headers = {
+            "token": instance_token,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "chatid": chat_id,
+            "limit": count,
+        }
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                logger.debug(
+                    f"get_messages({chat_id}) raw response type={type(data)}: {str(data)[:300]}"
+                )
+
+                if isinstance(data, list):
+                    raw_msgs = data
+                elif isinstance(data, dict):
+                    raw_msgs = (
+                        data.get("messages")
+                        or data.get("data")
+                        or data.get("result")
+                        or []
+                    )
+                else:
+                    raw_msgs = []
+
+                return [self._normalize_message(m) for m in raw_msgs]
+
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    "Erro HTTP ao buscar mensagens de %s: %s — %s",
+                    chat_id,
+                    e.response.status_code,
+                    e.response.text,
+                )
+                return []
+            except Exception as e:
+                logger.error("Erro ao buscar mensagens de %s: %s", chat_id, e)
+                return []
 
     # ─── Status da instância ──────────────────────────────────────────────
 
     async def get_instance_status(
         self,
-        api_url: str = "",
-        api_token: str = "",
-        instance_name: str = "",
+        api_url: str,
+        api_token: str,
+        instance_name: str,
         instance_token: str | None = None,
     ) -> dict:
-        async with httpx.AsyncClient(timeout=10) as client:
+        """
+        Verifica status de conexão da instância.
+        Endpoint UAZAPI GO V2: GET /instance/status
+        Header: token
+        """
+        url = f"{api_url.rstrip('/')}/instance/status"
+        token = instance_token or api_token
+        async with httpx.AsyncClient(timeout=15) as client:
             try:
-                resp = await client.get(f"{CONNECTOR_BASE}/instance/status")
+                resp = await client.get(url, headers={"token": token})
                 return resp.json()
             except Exception as e:
-                return {"error": str(e), "connected": False}
+                return {"error": str(e)}
+
+    # ─── Normalização ─────────────────────────────────────────────────────
+
+    def _normalize_chat(self, raw: dict) -> dict:
+        jid = (
+            raw.get("remoteJid")
+            or raw.get("id")
+            or raw.get("jid")
+            or raw.get("chatId")
+            or ""
+        )
+        phone = jid.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
+
+        last_msg_raw = raw.get("lastMessage") or raw.get("lastMsg") or {}
+        if isinstance(last_msg_raw, dict):
+            msg_obj = last_msg_raw.get("message", {}) or {}
+            if isinstance(msg_obj, dict):
+                last_message_text = (
+                    msg_obj.get("conversation", "")
+                    or (msg_obj.get("extendedTextMessage") or {}).get("text", "")
+                    or last_msg_raw.get("body", "")
+                    or last_msg_raw.get("text", "")
+                    or raw.get("preview", "")
+                    or ""
+                )
+            else:
+                last_message_text = str(msg_obj)
+        else:
+            last_message_text = str(last_msg_raw) if last_msg_raw else raw.get("preview", "")
+
+        return {
+            "id": jid,
+            "phone": phone,
+            "name": (
+                raw.get("name")
+                or raw.get("pushName")
+                or raw.get("notifyName")
+                or raw.get("verifiedName")
+                or (f"WhatsApp {phone[-4:]}" if phone else "Desconhecido")
+            ),
+            "last_message": last_message_text,
+            "last_message_at": (
+                raw.get("lastMessageAt")
+                or raw.get("conversationTimestamp")
+                or raw.get("t")
+                or raw.get("timestamp")
+                or None
+            ),
+            "unread_count": raw.get("unreadCount") or raw.get("unread") or 0,
+            "is_group": "@g.us" in jid,
+        }
+
+    def _normalize_message(self, raw: dict) -> dict:
+        key = raw.get("key", {}) or {}
+        msg_obj = raw.get("message", {}) or {}
+
+        if isinstance(msg_obj, str):
+            text = msg_obj
+        else:
+            text = (
+                msg_obj.get("conversation", "")
+                or (msg_obj.get("extendedTextMessage") or {}).get("text", "")
+                or (msg_obj.get("imageMessage") or {}).get("caption", "")
+                or (msg_obj.get("videoMessage") or {}).get("caption", "")
+                or raw.get("body", "")
+                or raw.get("text", "")
+                or ""
+            )
+
+        return {
+            "id": key.get("id") or raw.get("id") or raw.get("messageid") or "",
+            "from_me": key.get("fromMe", False) or raw.get("fromMe", False),
+            "text": text,
+            "timestamp": (
+                raw.get("messageTimestamp")
+                or raw.get("t")
+                or raw.get("timestamp")
+            ),
+            "status": raw.get("status") or raw.get("ack") or None,
+            "type": (
+                list(msg_obj.keys())[0]
+                if msg_obj and isinstance(msg_obj, dict) and msg_obj.keys()
+                else raw.get("messageType", "text")
+            ),
+        }
 
     # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -248,49 +574,16 @@ class UazapiClient:
 
     def _personalize_message(self, template: str, contact: dict) -> str:
         replacements = {
-            "{nome}":     contact.get("name", "Cliente"),
+            "{nome}": contact.get("name", "Cliente"),
             "{telefone}": contact.get("phone", ""),
-            "{email}":    contact.get("email", ""),
-            "{origem}":   contact.get("origin", ""),
+            "{email}": contact.get("email", ""),
+            "{origem}": contact.get("origin", ""),
         }
         result = template
         for key, value in replacements.items():
             result = result.replace(key, str(value))
         return result
 
-    # ─── Normalização (mantida para compatibilidade) ──────────────────────
 
-    def _normalize_chat(self, raw: dict) -> dict:
-        jid = raw.get("remoteJid") or raw.get("id") or raw.get("jid") or ""
-        phone = jid.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
-        return {
-            "id": jid,
-            "phone": phone,
-            "name": raw.get("name") or raw.get("pushName") or f"WhatsApp {phone[-4:]}",
-            "last_message": "",
-            "last_message_at": None,
-            "unread_count": 0,
-            "is_group": "@g.us" in jid,
-        }
-
-    def _normalize_message(self, raw: dict) -> dict:
-        key = raw.get("key", {}) or {}
-        msg_obj = raw.get("message", {}) or {}
-        text = (
-            msg_obj.get("conversation", "")
-            or (msg_obj.get("extendedTextMessage") or {}).get("text", "")
-            or raw.get("body", "")
-            or ""
-        ) if isinstance(msg_obj, dict) else str(msg_obj)
-        return {
-            "id":        key.get("id") or raw.get("id") or "",
-            "from_me":   key.get("fromMe", False),
-            "text":      text,
-            "timestamp": raw.get("messageTimestamp") or raw.get("timestamp"),
-            "status":    raw.get("status") or None,
-            "type":      list(msg_obj.keys())[0] if isinstance(msg_obj, dict) and msg_obj else "text",
-        }
-
-
-# Instância global — mesmo nome para compatibilidade total com todos os imports
+# Instância global
 uazapi = UazapiClient()

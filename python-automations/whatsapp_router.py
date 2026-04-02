@@ -1,57 +1,21 @@
 from __future__ import annotations
 """
 Rotas da aba WhatsApp — gerenciamento de conexão e conversas.
-Usa neonize (Python puro) para conexão com WhatsApp.
+WhatsApp gerenciado via UAZAPI GO V2 (nexaflow.uazapi.com).
 """
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from core import logger
+from config import get_settings
 from supabase_client import get_supabase
-from whatsapp_client import wa_client
+from uazapi_client import uazapi
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
 
-# ─── Gerenciamento de conexão (QR Code) ──────────────────────────────────────
-
-@router.get("/management/status")
-async def wa_get_status():
-    return wa_client.get_status()
-
-
-@router.get("/management/qr")
-async def wa_get_qr():
-    try:
-        status = wa_client.get_qr()
-        # Se neonize ainda não iniciou, tenta iniciar automaticamente
-        if not status.get("connected") and not status.get("qr") and wa_client.state == "disconnected":
-            if not (wa_client._thread and wa_client._thread.is_alive()):
-                logger.info("[WA] Auto-iniciando conexão via /management/qr")
-                wa_client.start()
-        return status
-    except Exception as e:
-        logger.error("[WA] Erro em wa_get_qr: %s", e)
-        return {"qr": None, "connected": False, "state": "error", "error": str(e)}
-
-
-@router.post("/management/connect")
-async def wa_connect():
-    wa_client.reconnect()
-    return {"ok": True, "message": "Iniciando conexão..."}
-
-
-@router.post("/management/disconnect")
-async def wa_disconnect_management():
-    wa_client.disconnect()
-    try:
-        db = get_supabase()
-        db.table("whatsapp_instances").update({"status": "disconnected"}).neq("id", "").execute()
-    except Exception:
-        pass
-    return {"ok": True}
-
+# ─── Modelos ──────────────────────────────────────────────────────────────────
 
 class SendMessageBody(BaseModel):
     chat_id: str
@@ -87,82 +51,208 @@ class DeleteChatBody(BaseModel):
     delete_chat_whatsapp: bool = True
 
 
+# ─── Helper: instância ativa ──────────────────────────────────────────────────
+
 def _get_active_instance() -> dict:
-    """Verifica se WhatsApp está conectado (neonize)."""
-    if not wa_client.connected:
+    """Busca a instância WhatsApp conectada no Supabase. Lança 503 se nenhuma disponível."""
+    db = get_supabase()
+    res = (
+        db.table("whatsapp_instances")
+        .select("api_url, api_token, instance_token, instance_name")
+        .eq("status", "connected")
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
         raise HTTPException(
             status_code=503,
-            detail="WhatsApp não conectado. Escaneie o QR Code primeiro.",
+            detail="Nenhuma instância WhatsApp conectada. Escaneie o QR Code primeiro.",
         )
-    return {"api_url": "internal-neonize", "api_token": "internal", "instance_name": "shopflow"}
+    return res.data[0]
 
 
-# ─── Diagnóstico de inicialização ────────────────────────────────────────────
-
-@router.get("/diagnostic")
-async def wa_diagnostic():
-    """Diagnóstico completo — mostra por que o neonize não está funcionando."""
-    import sys, os
-
-    # 1. Testa importação do neonize
-    neonize_ok = False
-    neonize_error = None
+def _get_any_instance() -> dict | None:
+    """Busca qualquer instância no Supabase (qualquer status). Retorna None se não houver."""
     try:
-        import neonize
-        neonize_ok = True
-        neonize_version = getattr(neonize, "__version__", "desconhecida")
+        db = get_supabase()
+        res = (
+            db.table("whatsapp_instances")
+            .select("api_url, api_token, instance_token, instance_name, status")
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
     except Exception as e:
-        neonize_error = str(e)
-        neonize_version = None
+        logger.warning("Erro ao buscar instância: %s", e)
+        return None
 
-    # 2. Testa diretório de sessão
-    session_dir = os.getenv("WA_SESSION_DIR", "./wa_sessions")
-    session_db = os.path.join(session_dir, "shopflow.db")
-    dir_writable = False
-    try:
-        os.makedirs(session_dir, exist_ok=True)
-        test_file = os.path.join(session_dir, ".write_test")
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.remove(test_file)
-        dir_writable = True
-    except Exception as e:
-        dir_writable = str(e)
 
-    # 3. Thread do neonize
-    thread_alive = bool(wa_client._thread and wa_client._thread.is_alive())
+# ─── Gerenciamento de conexão (QR Code) ──────────────────────────────────────
 
-    return {
-        "wa_state": wa_client.state,
-        "wa_connected": wa_client.connected,
-        "wa_has_qr": wa_client.qr_base64 is not None,
-        "wa_last_error": wa_client.last_error,
-        "wa_thread_alive": thread_alive,
-        "neonize_importable": neonize_ok,
-        "neonize_version": neonize_version,
-        "neonize_import_error": neonize_error,
-        "session_dir_writable": dir_writable,
-        "session_db_exists": os.path.exists(session_db),
-        "python_version": sys.version,
-        "platform": sys.platform,
-    }
+@router.get("/management/status")
+async def wa_get_status():
+    """Retorna o status da instância WhatsApp (UAZAPI)."""
+    s = get_settings()
+    instance = _get_any_instance()
+
+    if not instance:
+        return {"connected": False, "state": "disconnected", "instance_name": None}
+
+    api_url = instance.get("api_url") or s.uazapi_base_url
+    instance_token = instance.get("instance_token") or instance.get("api_token") or s.uazapi_admin_token
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                f"{api_url.rstrip('/')}/instance/status",
+                headers={"token": instance_token},
+            )
+            data = resp.json()
+            connected = (
+                data.get("connected")
+                or data.get("state") in ("open", "connected")
+                or instance.get("status") == "connected"
+            )
+            return {
+                "connected": bool(connected),
+                "state": data.get("state") or ("connected" if connected else "disconnected"),
+                "instance_name": instance.get("instance_name"),
+                "raw": data,
+            }
+        except Exception as e:
+            return {
+                "connected": instance.get("status") == "connected",
+                "state": instance.get("status", "disconnected"),
+                "instance_name": instance.get("instance_name"),
+                "error": str(e),
+            }
+
+
+@router.get("/management/qr")
+async def wa_get_qr():
+    """Retorna o QR Code da instância UAZAPI para escanear com o WhatsApp."""
+    s = get_settings()
+    instance = _get_any_instance()
+
+    api_url = (instance.get("api_url") if instance else None) or s.uazapi_base_url
+    instance_token = (
+        (instance.get("instance_token") or instance.get("api_token")) if instance else None
+    ) or s.uazapi_admin_token
+
+    if not instance_token:
+        return {"qr": None, "connected": False, "state": "disconnected", "error": "UAZAPI_ADMIN_TOKEN não configurado"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            # Tenta obter o QR code da instância
+            resp = await client.get(
+                f"{api_url.rstrip('/')}/instance/qrcode",
+                headers={"token": instance_token},
+            )
+            data = resp.json()
+
+            # Verifica se já está conectado
+            if data.get("connected") or data.get("state") in ("open", "connected"):
+                return {"qr": None, "connected": True, "state": "connected"}
+
+            qr = data.get("qrcode") or data.get("qr") or data.get("base64")
+            return {
+                "qr": qr,
+                "connected": False,
+                "state": data.get("state", "waiting_qr"),
+            }
+        except Exception as e:
+            logger.error("[WA] Erro ao buscar QR: %s", e)
+            return {"qr": None, "connected": False, "state": "error", "error": str(e)}
+
+
+@router.post("/management/connect")
+async def wa_connect():
+    """Inicia/reconecta a instância WhatsApp via UAZAPI."""
+    s = get_settings()
+
+    if not s.uazapi_admin_token:
+        raise HTTPException(status_code=500, detail="UAZAPI_ADMIN_TOKEN não configurado")
+
+    api_url = s.uazapi_base_url
+    instance = _get_any_instance()
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            if instance and instance.get("instance_token"):
+                # Instância existente — reconecta
+                resp = await client.post(
+                    f"{api_url.rstrip('/')}/instance/connect",
+                    headers={"token": instance["instance_token"], "Content-Type": "application/json"},
+                    json={},
+                )
+            else:
+                # Cria nova instância via admin
+                resp = await client.post(
+                    f"{api_url.rstrip('/')}/instance/create",
+                    headers={"token": s.uazapi_admin_token, "Content-Type": "application/json"},
+                    json={"name": "shopflow"},
+                )
+                data = resp.json()
+                new_token = data.get("token") or data.get("instance_token") or data.get("apikey")
+                if new_token:
+                    try:
+                        db = get_supabase()
+                        db.table("whatsapp_instances").upsert({
+                            "instance_name": "shopflow",
+                            "instance_token": new_token,
+                            "api_url": api_url,
+                            "api_token": s.uazapi_admin_token,
+                            "status": "pending",
+                        }, on_conflict="instance_name").execute()
+                    except Exception as dbe:
+                        logger.warning("Erro ao salvar instância no Supabase: %s", dbe)
+
+            return {"ok": True, "message": "Iniciando conexão... Acesse /management/qr para escanear o QR Code."}
+        except Exception as e:
+            logger.error("[WA] Erro ao conectar: %s", e)
+            raise HTTPException(status_code=502, detail=f"Erro ao conectar: {e}")
+
+
+@router.post("/management/disconnect")
+async def wa_disconnect_management():
+    """Desconecta o WhatsApp e remove a instância."""
+    instance = _get_any_instance()
+
+    if instance:
+        # Remove da UAZAPI
+        api_url = instance.get("api_url") or get_settings().uazapi_base_url
+        instance_token = instance.get("instance_token") or instance.get("api_token")
+        if instance_token:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.delete(
+                        f"{api_url.rstrip('/')}/instance",
+                        headers={"token": instance_token},
+                    )
+            except Exception as e:
+                logger.warning("[WA] Erro ao deletar instância na UAZAPI: %s", e)
+
+        # Atualiza status no Supabase
+        try:
+            db = get_supabase()
+            db.table("whatsapp_instances").update({"status": "disconnected"}).neq("id", "").execute()
+        except Exception as e:
+            logger.warning("[WA] Erro ao atualizar status no Supabase: %s", e)
+
+    return {"ok": True}
 
 
 # ─── Debug / Diagnóstico ──────────────────────────────────────────────────────
 
 @router.get("/debug")
 async def debug_whatsapp():
-    """
-    Endpoint de diagnóstico — verifica a conexão com a UAZAPI GO V2 e
-    retorna o status da instância e uma amostra de chats brutos.
-    Útil para verificar se os endpoints estão corretos.
-    """
+    """Diagnóstico — verifica conexão com UAZAPI GO V2."""
     try:
         instance = _get_active_instance()
     except HTTPException as e:
         return {"error": str(e.detail), "instance": None}
 
-    # Testa status da instância
     status = await uazapi.get_instance_status(
         api_url=instance["api_url"],
         api_token=instance["api_token"],
@@ -170,7 +260,6 @@ async def debug_whatsapp():
         instance_token=instance.get("instance_token"),
     )
 
-    # Testa busca de chats (retorna raw para diagnóstico)
     raw_chats_sample = None
     raw_error = None
     try:
@@ -204,10 +293,7 @@ async def debug_whatsapp():
 
 @router.get("/conversations")
 async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
-    """
-    Lista as últimas conversas do WhatsApp conectado.
-    Busca na UAZAPI GO V2 (POST /chat/find) e enriquece com nomes do CRM.
-    """
+    """Lista as últimas conversas do WhatsApp conectado via UAZAPI GO V2."""
     instance = _get_active_instance()
 
     chats = await uazapi.get_chats(
@@ -221,7 +307,6 @@ async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
     if not chats:
         return {"conversations": [], "total": 0}
 
-    # Enriquece com nomes do CRM em lote
     phones = [c["phone"] for c in chats if c.get("phone")]
     crm_map: dict[str, dict] = {}
     if phones:
@@ -253,15 +338,12 @@ async def list_conversations(count: int = Query(default=50, ge=1, le=200)):
             }
         )
 
-    # Ordena por timestamp — converte tudo para float (Unix epoch) para evitar
-    # TypeError ao comparar int com str em Python 3.
     def _sort_ts(x) -> float:
         ts = x.get("last_message_at")
         if ts is None:
             return 0.0
         if isinstance(ts, (int, float)):
             return float(ts)
-        # ISO string → converte para Unix timestamp para comparação uniforme
         try:
             from datetime import datetime as _dt
             return _dt.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
@@ -279,10 +361,7 @@ async def get_conversation_messages(
     chat_id: str,
     count: int = Query(default=30, ge=1, le=100),
 ):
-    """
-    Retorna mensagens de uma conversa.
-    Mescla mensagens da UAZAPI GO V2 (POST /message/find) com histórico do Supabase.
-    """
+    """Retorna mensagens de uma conversa mesclando UAZAPI + histórico do Supabase."""
     instance = _get_active_instance()
 
     full_jid = chat_id if "@" in chat_id else f"{chat_id}@s.whatsapp.net"
@@ -292,7 +371,6 @@ async def get_conversation_messages(
         .replace("@lid", "")
     )
 
-    # 1. Mensagens do WhatsApp (UAZAPI GO V2 — POST /message/find)
     wa_messages = await uazapi.get_messages(
         api_url=instance["api_url"],
         instance_token=instance["instance_token"],
@@ -301,7 +379,6 @@ async def get_conversation_messages(
     )
     logger.info(f"get_messages({full_jid}) retornou {len(wa_messages)} mensagens")
 
-    # 2. Mensagens salvas no Supabase (enviadas pelo agente/Jarvis)
     crm_messages: list[dict] = []
     try:
         db = get_supabase()
@@ -336,7 +413,6 @@ async def get_conversation_messages(
     except Exception as e:
         logger.warning("Erro ao buscar histórico do CRM: %s", e)
 
-    # 3. Mescla e ordena por timestamp
     all_messages = [{**m, "source": "whatsapp"} for m in wa_messages] + crm_messages
 
     def _sort_key(m) -> float:
@@ -345,7 +421,6 @@ async def get_conversation_messages(
             return 0.0
         if isinstance(ts, (int, float)):
             return float(ts)
-        # ISO string → converte para Unix timestamp para comparação uniforme
         try:
             from datetime import datetime as _dt
             return _dt.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
@@ -377,11 +452,18 @@ async def send_message(body: SendMessageBody):
         .replace("@lid", "")
     )
 
-    sent = wa_client.send_text(phone, body.message)
-    if not sent:
-        raise HTTPException(status_code=502, detail="Erro ao enviar mensagem. Verifique se o WhatsApp está conectado.")
+    result = await uazapi.send_text(
+        api_url=instance["api_url"],
+        api_token=instance["api_token"],
+        instance_name=instance.get("instance_name", ""),
+        phone=phone,
+        message=body.message,
+        instance_token=instance.get("instance_token"),
+    )
 
-    # Salva no CRM se o cliente existir
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=f"Erro ao enviar: {result['error']}")
+
     try:
         db = get_supabase()
         client_res = (
@@ -414,8 +496,10 @@ async def send_media(body: SendMediaBody):
     phone = body.chat_id.replace("@s.whatsapp.net", "").replace("@c.us", "").replace("@lid", "")
 
     extra_args = {}
-    if body.delay: extra_args["delay"] = body.delay
-    if body.reply_id: extra_args["replyid"] = body.reply_id
+    if body.delay:
+        extra_args["delay"] = body.delay
+    if body.reply_id:
+        extra_args["replyid"] = body.reply_id
 
     result = await uazapi.send_media(
         api_url=instance["api_url"],
@@ -432,7 +516,6 @@ async def send_media(body: SendMediaBody):
     if "error" in result:
         raise HTTPException(status_code=502, detail=f"Erro ao enviar mídia: {result['error']}")
 
-    # Salva referência no CRM
     try:
         db = get_supabase()
         client_res = db.table("clients").select("id").eq("phone", phone).limit(1).execute()
