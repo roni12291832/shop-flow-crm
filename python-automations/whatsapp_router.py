@@ -183,7 +183,8 @@ async def wa_get_qr():
                 logger.error("[WA] Erro ao criar instância: %s", e)
                 return {"qr": None, "connected": False, "state": "error", "error": f"Erro ao criar instância: {e}"}
 
-        # 2. Verifica se já está conectado
+        # 2. Verifica status atual
+        state = "disconnected"
         try:
             status_resp = await client.get(
                 f"{api_url}/instance/status",
@@ -191,18 +192,36 @@ async def wa_get_qr():
             )
             status_data = status_resp.json()
             logger.info("[WA] Status instância: %s", str(status_data)[:200])
+
             if status_data.get("connected") or status_data.get("state") in ("open", "connected"):
-                # Atualiza Supabase para connected
                 try:
                     db = get_supabase()
                     db.table("whatsapp_instances").update({"status": "connected"}).eq("instance_token", instance_token).execute()
                 except Exception:
                     pass
                 return {"qr": None, "connected": True, "state": "connected"}
+
+            state = status_data.get("state", "disconnected")
         except Exception as e:
             logger.warning("[WA] Erro ao verificar status: %s", e)
 
-        # 3. Busca QR code
+        # 3. Se desconectado, inicia a conexão para gerar o QR
+        if state not in ("qr", "waiting_qr", "connecting"):
+            logger.info("[WA] Instância desconectada — chamando /instance/connect para iniciar QR")
+            try:
+                conn_resp = await client.post(
+                    f"{api_url}/instance/connect",
+                    headers={"token": instance_token, "Content-Type": "application/json"},
+                    json={},
+                )
+                conn_data = conn_resp.json()
+                logger.info("[WA] Resposta connect (status %s): %s", conn_resp.status_code, str(conn_data)[:200])
+            except Exception as e:
+                logger.warning("[WA] Erro ao chamar /instance/connect: %s", e)
+
+        # 4. Busca QR code
+        import asyncio as _asyncio
+        await _asyncio.sleep(1)  # aguarda 1s para UAZAPI gerar o QR
         try:
             qr_resp = await client.get(
                 f"{api_url}/instance/qrcode",
@@ -211,7 +230,6 @@ async def wa_get_qr():
             qr_data = qr_resp.json()
             logger.info("[WA] Resposta QR (status %s): %s", qr_resp.status_code, str(qr_data)[:300])
 
-            # Verifica se já conectou durante a chamada
             if qr_data.get("connected") or qr_data.get("state") in ("open", "connected"):
                 return {"qr": None, "connected": True, "state": "connected"}
 
@@ -225,7 +243,7 @@ async def wa_get_qr():
                 "qr": qr,
                 "connected": False,
                 "state": qr_data.get("state", "waiting_qr"),
-                "debug": str(qr_data)[:200] if not qr else None,
+                "debug": str(qr_data)[:300] if not qr else None,
             }
         except Exception as e:
             logger.error("[WA] Erro ao buscar QR: %s", e)
