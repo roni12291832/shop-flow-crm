@@ -128,6 +128,55 @@ async def wa_get_status():
             }
 
 
+@router.get("/management/uazapi-probe")
+async def uazapi_probe():
+    """
+    Diagnóstico completo: testa todos os endpoints relevantes da UAZAPI e retorna
+    as respostas brutas. Use para descobrir quais endpoints funcionam.
+    """
+    s = get_settings()
+    api_url = s.uazapi_base_url.rstrip("/")
+    admin_token = s.uazapi_admin_token
+    instance = _get_any_instance()
+    instance_token = instance.get("instance_token") if instance else None
+
+    results = {}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # Testa com admin token
+        for path in ["/instance/list", "/instances", "/instance"]:
+            try:
+                r = await client.get(f"{api_url}{path}", headers={"token": admin_token})
+                results[f"admin GET {path}"] = {"status": r.status_code, "body": r.text[:400]}
+            except Exception as e:
+                results[f"admin GET {path}"] = {"error": str(e)}
+
+        if instance_token:
+            # Testa com instance token
+            for path in ["/instance/status", "/instance/qrcode", "/instance/qr", "/instance/connect"]:
+                try:
+                    r = await client.get(f"{api_url}{path}", headers={"token": instance_token})
+                    results[f"instance GET {path}"] = {"status": r.status_code, "body": r.text[:400]}
+                except Exception as e:
+                    results[f"instance GET {path}"] = {"error": str(e)}
+
+            # Testa POST connect
+            for path in ["/instance/connect", "/instance/restart"]:
+                try:
+                    r = await client.post(f"{api_url}{path}", headers={"token": instance_token, "Content-Type": "application/json"}, json={})
+                    results[f"instance POST {path}"] = {"status": r.status_code, "body": r.text[:400]}
+                except Exception as e:
+                    results[f"instance POST {path}"] = {"error": str(e)}
+
+    return {
+        "api_url": api_url,
+        "has_admin_token": bool(admin_token),
+        "has_instance_token": bool(instance_token),
+        "instance_token_preview": instance_token[:8] + "..." if instance_token else None,
+        "results": results,
+    }
+
+
 @router.get("/management/qr")
 async def wa_get_qr():
     """
